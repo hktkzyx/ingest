@@ -18,7 +18,7 @@ import (
 	"github.com/hktkzyx/ingest/internal/template"
 )
 
-var version = "0.0.1-dev"
+var version = "0.0.1"
 
 var (
 	flagSource   string
