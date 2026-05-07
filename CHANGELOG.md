@@ -6,6 +6,41 @@
 
 ## [Unreleased]
 
+## [0.1.0-alpha.2] - 2026-05-08
+
+第二个 alpha 预发布。在 alpha.1 上补齐多事件分段、交互式段编辑、设备识别确认 prompt，并修正两个出厂识别规则与 partial directory 评分阈值。
+
+### Fixed
+
+- **SONY ZVE10M2 默认识别规则收紧**：原来 `directories: [PRIVATE/SONY, DCIM]` 太宽——杂牌 U 盘只要有 `DCIM` 就会被部分命中误判（如 v0.1.0-alpha.1 上 G:\ 被打成 confidence 0.60）。改为 `[PRIVATE/M4ROOT, DCIM/100MSDCF]`，对应 ZVE10M2 实际卡布局（视频在 `M4ROOT/CLIP`、图片在 `DCIM/100MSDCF`）。
+- **DJI Pocket3 默认识别规则修正**：原来 `directories: [DCIM/100MEDIA]` 完全对不上——Pocket 3 实际是 `DCIM/DJI_001/`（序号会滚动）+ `MISC/IDX/` + `MISC/THM/`。改为 `[MISC/THM, MISC/IDX]`，避开会变的 `DJI_NNN` 序号；file_patterns 加上 `DJI_*.JPG` 和 `DJI_*.WAV` 覆盖照片和音频。
+- **`device.score` 部分命中阈值提高**：原来 `dirHits > 0` 就给 0.5+ 评分；改为至少命中 2 个目录才回落 partial 档，避免单个偶然命中触发 false positive。
+
+### Note for existing users
+
+已运行过 v0.1.0-alpha.1 的用户，`~/.config/ingest/devices.yaml` 已经写出，更新出厂默认不会自动回灌。要拿到新规则有两种办法：
+
+1. 直接编辑 `~/.config/ingest/devices.yaml`，把 ZVE10M2 的 `directories` 改成 `["PRIVATE/M4ROOT", "DCIM/100MSDCF"]`
+2. 删除 `~/.config/ingest/devices.yaml`，下次运行时会重新写出新版默认
+
+### Added
+
+- **多事件分段**：`period.Segments(files, gapDays)` 把文件按拍摄时间相邻聚成段；相邻文件日期间隔 ≤ `gap_days` 视为同段。
+- **`config.yaml` 全局设置**：`internal/config` 包，路径同 `~/.config/ingest/`，首次运行写入内嵌默认；目前只有 `gap_days`，后续可加更多工具行为参数。
+- **交互式 prompt**：`internal/prompt` 包提供设备确认（Y/n/list）、段编辑（范围 + 事件名）、卷选择；统一 `IO{In, Out}` 便于 mock。
+- **设备交互式覆盖**：自动检测后 prompt 用户确认，错了可输 `list` 改选；`--device` 显式指定时跳过；`--yes` 自动接受。
+- **多段交互式确认**：自动分段后逐段 prompt 起止日期 + 事件名；`--name` 仅适用于单段（多段时报错）。
+- `--gap-days N` flag，临时覆盖 config 中的设置。
+- `--config <path>` flag，覆盖默认 `config.yaml` 路径。
+- `LICENSE` 文件（MIT），README/CONTRIBUTING 许可证节同步。
+
+### Changed
+
+- `runIngest` 主流程重写：load settings → mount detection → device confirm → segment files → per-segment prompt → loop copy。
+- 单段 `--name` 行为保留向后兼容；多段 + `--name` 报错（不知道把名字给哪段）；多段 + `--yes` 报错（不允许盲发）。
+- `internal/period` 重写 `Infer` 为 `Segments` 的退化版（强制单段）。
+- README 安装节重写，明确推荐预编译二进制下载，列出 5 平台文件名表，说明 `devices.yaml` / `config.yaml` 由 `go:embed` 内嵌、首次运行自动写出。
+
 ## [0.1.0-alpha.1] - 2026-05-08
 
 第一个 alpha 预发布。MVP 之上完成 Phase 1 ergonomics 三件套（YAML 设备配置、EXIF/QT 时间提取、自动挂载检测）以及跨平台 release 流水线。TUI 推迟到 v0.2.0。
@@ -59,6 +94,7 @@
 - 没有 TUI；事件名 `--name` 必填，无交互式提示
 - 测试套件计划在 Phase 4 补齐，当前仓库无单元测试
 
-[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.2...HEAD
+[0.1.0-alpha.2]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.1
 [0.0.1]: https://github.com/hktkzyx/ingest/releases/tag/v0.0.1

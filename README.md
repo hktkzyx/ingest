@@ -4,14 +4,16 @@
 
 `ingest` 是一个跨平台的命令行工具，用于把相机 SD 卡里的素材按结构归档到本地，并保证字节级校验、可重复执行。它面向多设备影像创作者（微单 + 无人机 + 运动相机），目标是把 `rsync` 的可靠性和 Kocard / Hedge 这类商业工具的易用性结合起来——但完全开源、可定制。
 
-**当前状态**：`v0.0.1`（测试版本，Phase 1 MVP）已发布；`develop` 分支已陆续合入 YAML 设备配置、EXIF/QuickTime 时间提取、跨平台 release 流水线、自动挂载检测，将在 v0.1.0 一并发布。TUI 交互仍在路线图上。完整规格见 [PRD.md](./PRD.md)。
+**当前状态**：`v0.1.0-alpha.1` 已发布预编译二进制（5 平台）。功能基本对齐 PRD Phase 1：YAML 设备配置、EXIF/QuickTime 时间提取、自动挂载检测、多事件分段、交互式设备/事件确认。TUI 交互推迟到 v0.2.0。完整规格见 [PRD.md](./PRD.md)。
 
 ---
 
 ## 它做什么
 
-- **自动识别设备**（出厂内置 Sony / DJI Pocket3，规则放在 `~/.config/ingest/devices.yaml`，可任意编辑增删）
+- **自动识别设备**（出厂内置 Sony / DJI Pocket3，规则放在 `~/.config/ingest/devices.yaml`，可任意编辑增删；识别错了交互式改写）
+- **自动挂载检测**：插卡后不必传 `--source`，跨平台枚举可移动卷自动选
 - **推断拍摄时间段**（图片读 EXIF `DateTimeOriginal`，视频读 QuickTime `mvhd` creation_time，提取失败回退到文件 mtime）
+- **多事件分段**：按"连续 N 天 = 一个事件"自动切分，逐段交互式确认日期范围 + 事件名（`gap_days` 在 `config.yaml` 里改）
 - **按模板生成目标路径**
 - **安全拷贝**：流式 xxHash64 + 临时文件 + 原子 rename + mtime/权限保留
 - **幂等**：同一张卡重复插入只跳过已校验通过的文件（基于 SQLite 历史库）
@@ -20,19 +22,36 @@
 
 ## 安装
 
-### 预编译二进制（推荐）
+### 推荐：下载预编译二进制
 
-到 [Releases](https://github.com/hktkzyx/ingest/releases) 下载对应平台的归档（Linux / macOS / Windows，amd64 + arm64），解包后把 `ingest` 放到 `PATH` 即可。每个 release 附 `checksums.txt` 用于校验。
+到 [Releases](https://github.com/hktkzyx/ingest/releases) 选最新的 `v0.1.0-alpha.x` 或更高版本，下载对应平台的归档：
+
+| 平台 | 文件名 |
+|---|---|
+| Linux x86_64 | `ingest_<版本>_linux_x86_64.tar.gz` |
+| Linux ARM64 (Raspberry Pi 4/5、ARM 服务器) | `ingest_<版本>_linux_arm64.tar.gz` |
+| macOS Intel | `ingest_<版本>_macos_x86_64.tar.gz` |
+| macOS Apple Silicon (M 系列) | `ingest_<版本>_macos_arm64.tar.gz` |
+| Windows x86_64 | `ingest_<版本>_windows_x86_64.zip` |
+
+每个 release 都附 `checksums.txt`，建议下完先校验再解包。
+
+**Linux / macOS**
 
 ```bash
-# 示例：Linux x86_64
-curl -L https://github.com/hktkzyx/ingest/releases/latest/download/ingest_<版本>_linux_x86_64.tar.gz | tar xz
-sudo mv ingest /usr/local/bin/
+# 一行下载 + 解包到 /usr/local/bin（按平台改文件名）
+curl -L https://github.com/hktkzyx/ingest/releases/latest/download/ingest_0.1.0-alpha.1_linux_x86_64.tar.gz | tar xz
+sudo install -m 0755 ingest /usr/local/bin/
+ingest version
 ```
 
-> v0.0.1 是手工发布、暂未提供二进制；自 v0.1.0 起由 goreleaser 自动构建。
+**Windows**
 
-### 从源码安装
+下载 `.zip` 解压，把 `ingest.exe` 拖到一个在 `PATH` 里的目录（例如 `C:\Users\<你>\bin\` 并把它加到系统环境变量），或者直接 `cd` 到解压目录运行。
+
+二进制是 self-contained 的：`devices.yaml` 和 `config.yaml` 都用 `go:embed` 打包在 binary 里，**首次运行会自动写到** `~/.config/ingest/` 下（Windows 是 `%USERPROFILE%\.config\ingest\`），无需手动放配置文件。
+
+### 备选：从源码安装
 
 需要 Go **1.24+**（构建会自动升到 `go.mod` 中固定的 toolchain 版本）。
 
@@ -96,16 +115,19 @@ ingest --source /Volumes/SONY_XYZ --target ~/Backups --name "周末骑行" -v
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `-s`, `--source` | _（自动检测）_ | 源路径（挂载点 / 目录）。省略时枚举系统挂载点 + 设备规则匹配，1 个候选直采，多个候选交互式选 |
+| `-s`, `--source` | _（自动检测）_ | 源路径（挂载点 / 目录）。省略时枚举系统挂载点 + 设备规则匹配；1 个候选直采，多个候选交互式选 |
 | `-t`, `--target` | `~/Backups` | 目标根目录 |
-| `-n`, `--name` | _（必填）_ | 事件名称，对应 `{event_name}` |
-| `--device` | _（自动）_ | 强制指定设备 ID，如 `zve10m2`、`pocket3` |
-| `--from` | _（按 mtime）_ | 时间段起始 (`YYYY-MM-DD`) |
-| `--to` | _（按 mtime）_ | 时间段结束 (`YYYY-MM-DD`) |
+| `-n`, `--name` | _（每段交互式询问）_ | 事件名称。仅适用于自动检测出单段时；多段时需逐段交互输入 |
+| `--device` | _（自动检测 + 询问）_ | 强制指定设备 ID（如 `zve10m2`），跳过检测 prompt |
+| `--from` | _（自动）_ | 强制时间段起始 (`YYYY-MM-DD`)，会强制单段 |
+| `--to` | _（自动）_ | 强制时间段结束 (`YYYY-MM-DD`)，会强制单段 |
+| `--gap-days` | _（来自 config）_ | 自动分段时允许的日期间隔。覆盖 `config.yaml` 的 `gap_days` |
 | `--template` | `{date_start}[_{date_end}]-{event_name}/origin-{device_name}` | 路径模板 |
 | `--db` | `$XDG_DATA_HOME/ingest/ingest.db`，回退 `~/.local/share/ingest/ingest.db` | 历史数据库路径 |
 | `--devices` | `$XDG_CONFIG_HOME/ingest/devices.yaml`，回退 `~/.config/ingest/devices.yaml` | 设备规则文件，缺失时自动写入出厂默认 |
+| `--config` | `$XDG_CONFIG_HOME/ingest/config.yaml`，回退 `~/.config/ingest/config.yaml` | 全局设置文件，缺失时自动写入出厂默认 |
 | `--dry-run` | `false` | 仅预览，不实际拷贝 |
+| `-y`, `--yes` | `false` | 接受所有自动选择（多挂载选最高分、设备直接接受）；与多段不兼容 |
 | `-v`, `--verbose` | `false` | 详细输出 |
 
 ### 模板语法
@@ -138,11 +160,27 @@ devices:
     manufacturer: "SONY" # 仅展示用
     detect:
       volume_labels: ["SONY"]                               # 卷标包含任一 → 0.90
-      directories:   ["PRIVATE/SONY", "DCIM"]               # 全部命中 → 0.80
-      file_patterns: ["C*.MP4", "C*.MTS", "DSC*.ARW"]       # 根目录或下两层 glob → 0.70
+      directories:   ["PRIVATE/M4ROOT", "DCIM/100MSDCF"]    # 全部命中 → 0.80
+      file_patterns: ["C*.MP4", "DSC*.ARW", "DSC*.JPG"]     # 根目录或下两层 glob → 0.70
 ```
 
+> 提示：`directories` 应该列**这台设备特有的**目录组合（避免 `DCIM` 这种通用名）。partial directory 档要求至少 2 个目录命中，单个偶然命中不会触发误判。
+
 多设备同时匹配取置信度最高者。要换文件位置：`ingest --devices /path/to/your.yaml ...`。
+
+---
+
+## 全局设置 `config.yaml`
+
+工具自身的行为参数（不是设备规则）放在另一个文件里，路径同样在 `~/.config/ingest/`，首次运行自动写出。
+
+```yaml
+version: "1"
+gap_days: 1   # 自动分段时允许的日期间隔；相邻文件拍摄日期相差 ≤ 该值视为同段。
+              # 默认 1：今天 + 明天合一段，中间空一天就分段。
+```
+
+CLI 上的 `--gap-days N` 会临时覆盖这里的设置。
 
 ---
 
@@ -176,7 +214,9 @@ devices:
 │   │   └── default.yaml    # 内嵌的出厂默认（go:embed）
 │   ├── mount/              # 跨平台枚举可移动挂载卷（linux/darwin/windows 各一个 build tag 文件）
 │   ├── timestamp/          # EXIF / QuickTime 拍摄时间提取
-│   ├── period/             # 时间段推断（timestamp 优先，mtime 兜底）
+│   ├── period/             # 时间段推断 + 多事件分段（timestamp 优先，mtime 兜底）
+│   ├── prompt/             # 交互式 stdin 提示（设备确认、段编辑、卷选择）
+│   ├── config/             # config.yaml 加载（gap_days 等全局设置）
 │   ├── template/           # 路径模板解析与渲染
 │   ├── copier/             # 安全拷贝协议——核心逻辑
 │   └── db/                 # SQLite 历史库（modernc.org/sqlite，纯 Go）
@@ -219,8 +259,8 @@ devices:
 
 | 版本 | 重点 |
 |---|---|
-| **v0.1.0** | TUI 交互（EXIF/QT 提取、跨平台发布、YAML 设备配置、自动挂载检测已在 develop 完成） |
-| **v0.2.0** | 多目标备份、`verify` / `history` 子命令、`devices.yaml` schema 校验 |
+| **v0.1.0**（当前 alpha）| YAML 设备配置、EXIF/QT 时间提取、跨平台自动挂载检测、多事件分段、交互式设备 / 事件确认、跨平台 release 流水线 |
+| **v0.2.0** | TUI 交互（bubbletea）、多目标备份、`verify` / `history` 子命令、`devices.yaml`/`config.yaml` schema 校验 |
 | **v0.3.0** | 代理文件生成（FFmpeg）、多卡队列、剪辑软件 XML 导出、云端归档 |
 | **v1.0.0** | 测试覆盖率 >80%、包管理分发（Homebrew/Scoop） |
 
@@ -228,4 +268,4 @@ devices:
 
 ## 许可证
 
-待定，倾向 MIT 或 Apache-2.0。
+[MIT](./LICENSE)。Copyright © 2026 hktkzyx。
