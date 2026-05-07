@@ -4,14 +4,14 @@
 
 `ingest` 是一个跨平台的命令行工具，用于把相机 SD 卡里的素材按结构归档到本地，并保证字节级校验、可重复执行。它面向多设备影像创作者（微单 + 无人机 + 运动相机），目标是把 `rsync` 的可靠性和 Kocard / Hedge 这类商业工具的易用性结合起来——但完全开源、可定制。
 
-**当前状态**：`v0.0.1`（测试版本，Phase 1 MVP）。引擎已通过 CLI flag 端到端跑通；TUI、EXIF、自动挂载检测、YAML 配置仍在路线图上。完整规格见 [PRD.md](./PRD.md)。
+**当前状态**：`v0.0.1`（测试版本，Phase 1 MVP）已发布；`develop` 分支已陆续合入 YAML 设备配置、EXIF/QuickTime 时间提取、跨平台 release 流水线、自动挂载检测，将在 v0.1.0 一并发布。TUI 交互仍在路线图上。完整规格见 [PRD.md](./PRD.md)。
 
 ---
 
 ## 它做什么
 
-- **自动识别设备**（内置 Sony / DJI Pocket3，YAML 规则规划中）
-- **推断拍摄时间段**（基于文件 mtime；EXIF / QuickTime 提取规划中）
+- **自动识别设备**（出厂内置 Sony / DJI Pocket3，规则放在 `~/.config/ingest/devices.yaml`，可任意编辑增删）
+- **推断拍摄时间段**（图片读 EXIF `DateTimeOriginal`，视频读 QuickTime `mvhd` creation_time，提取失败回退到文件 mtime）
 - **按模板生成目标路径**
 - **安全拷贝**：流式 xxHash64 + 临时文件 + 原子 rename + mtime/权限保留
 - **幂等**：同一张卡重复插入只跳过已校验通过的文件（基于 SQLite 历史库）
@@ -20,11 +20,21 @@
 
 ## 安装
 
-### 前置要求
+### 预编译二进制（推荐）
 
-- Go **1.24+**（构建会自动升到 `go.mod` 中固定的 toolchain 版本）
+到 [Releases](https://github.com/hktkzyx/ingest/releases) 下载对应平台的归档（Linux / macOS / Windows，amd64 + arm64），解包后把 `ingest` 放到 `PATH` 即可。每个 release 附 `checksums.txt` 用于校验。
+
+```bash
+# 示例：Linux x86_64
+curl -L https://github.com/hktkzyx/ingest/releases/latest/download/ingest_<版本>_linux_x86_64.tar.gz | tar xz
+sudo mv ingest /usr/local/bin/
+```
+
+> v0.0.1 是手工发布、暂未提供二进制；自 v0.1.0 起由 goreleaser 自动构建。
 
 ### 从源码安装
+
+需要 Go **1.24+**（构建会自动升到 `go.mod` 中固定的 toolchain 版本）。
 
 ```bash
 git clone https://github.com/hktkzyx/ingest.git
@@ -42,7 +52,7 @@ export PATH="$HOME/go/bin:$PATH"   # 写到 ~/.zshrc 或 ~/.bashrc 持久化
 
 ```bash
 ingest version          # → ingest 0.0.1-dev
-ingest devices list     # → 内置设备规则
+ingest devices list     # → 当前配置的设备规则（首次运行自动生成 ~/.config/ingest/devices.yaml）
 ```
 
 ---
@@ -62,13 +72,15 @@ ingest --source /Volumes/SONY_XYZ --target ~/Backups --name "周末骑行" -v
 ```
 ~/Backups/
 └── 20260427-周末骑行/
-    └── origin-zve10m2/
+    └── origin-SONY_ZVE10M2/
         ├── C0001.MP4
         ├── C0002.MP4
         └── DSC00001.ARW
 ```
 
 再次运行同一条命令，每个文件都会在毫秒级内被跳过——`~/.local/share/ingest/ingest.db` 这个 SQLite 历史库记得每次拷贝过的内容。
+
+> 提示：`--source`、`--target`、`--db`、`--devices` 都支持 `~`、`$VAR`、相对路径、绝对路径，Windows 上原生处理 `\` 与盘符。
 
 ---
 
@@ -78,20 +90,21 @@ ingest --source /Volumes/SONY_XYZ --target ~/Backups --name "周末骑行" -v
 |---|---|
 | `ingest [flags]` | 执行一次摄取（默认命令） |
 | `ingest version` | 显示版本 |
-| `ingest devices list` | 列出内置设备识别规则 |
+| `ingest devices list` | 列出当前配置的设备识别规则（同时显示规则文件路径） |
 
 ### 参数
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `-s`, `--source` | _（必填）_ | 源路径（挂载点 / 目录） |
+| `-s`, `--source` | _（自动检测）_ | 源路径（挂载点 / 目录）。省略时枚举系统挂载点 + 设备规则匹配，1 个候选直采，多个候选交互式选 |
 | `-t`, `--target` | `~/Backups` | 目标根目录 |
 | `-n`, `--name` | _（必填）_ | 事件名称，对应 `{event_name}` |
 | `--device` | _（自动）_ | 强制指定设备 ID，如 `zve10m2`、`pocket3` |
 | `--from` | _（按 mtime）_ | 时间段起始 (`YYYY-MM-DD`) |
 | `--to` | _（按 mtime）_ | 时间段结束 (`YYYY-MM-DD`) |
-| `--template` | `{date_start}[_{date_end}]-{event_name}/origin-{device_id}` | 路径模板 |
-| `--db` | `~/.local/share/ingest/ingest.db` | 历史数据库路径 |
+| `--template` | `{date_start}[_{date_end}]-{event_name}/origin-{device_name}` | 路径模板 |
+| `--db` | `$XDG_DATA_HOME/ingest/ingest.db`，回退 `~/.local/share/ingest/ingest.db` | 历史数据库路径 |
+| `--devices` | `$XDG_CONFIG_HOME/ingest/devices.yaml`，回退 `~/.config/ingest/devices.yaml` | 设备规则文件，缺失时自动写入出厂默认 |
 | `--dry-run` | `false` | 仅预览，不实际拷贝 |
 | `-v`, `--verbose` | `false` | 详细输出 |
 
@@ -106,10 +119,30 @@ ingest --source /Volumes/SONY_XYZ --target ~/Backups --name "周末骑行" -v
 | `date_end` | `20260503`（单天为空） |
 | `event_name` | `周末骑行` |
 | `device_id` | `zve10m2` |
-| `device_name` | `Sony ZV-E10M2` |
+| `device_name` | `SONY_ZVE10M2`（来自 `devices.yaml` 中的 `name` 字段，空格自动替换为 `_`） |
 
-单天：`{date_start}[_{date_end}]-{event_name}/origin-{device_id}` → `20260427-周末骑行/origin-zve10m2`
-跨天：同模板 → `20260427_20260503-五一假期/origin-pocket3`
+单天：`{date_start}[_{date_end}]-{event_name}/origin-{device_name}` → `20260427-周末骑行/origin-SONY_ZVE10M2`
+跨天：同模板 → `20260427_20260503-五一假期/origin-DJI_Pocket3`
+
+---
+
+## 设备规则 `devices.yaml`
+
+首次运行时会把内嵌的出厂默认写到 `~/.config/ingest/devices.yaml`（若设了 `XDG_CONFIG_HOME` 则在那下面），之后每次运行都重新读取该文件——增删条目不需要重编。
+
+```yaml
+version: "1"
+devices:
+  - id: zve10m2          # 必填，CLI 用 --device <id> 强指定
+    name: "SONY ZVE10M2" # {device_name} 即此值，空格自动替换为 _
+    manufacturer: "SONY" # 仅展示用
+    detect:
+      volume_labels: ["SONY"]                               # 卷标包含任一 → 0.90
+      directories:   ["PRIVATE/SONY", "DCIM"]               # 全部命中 → 0.80
+      file_patterns: ["C*.MP4", "C*.MTS", "DSC*.ARW"]       # 根目录或下两层 glob → 0.70
+```
+
+多设备同时匹配取置信度最高者。要换文件位置：`ingest --devices /path/to/your.yaml ...`。
 
 ---
 
@@ -139,7 +172,11 @@ ingest --source /Volumes/SONY_XYZ --target ~/Backups --name "周末骑行" -v
 ├── internal/
 │   ├── scanner/            # 扫描源卷，区分媒体文件与 sidecar
 │   ├── device/             # 设备识别规则与匹配器
-│   ├── period/             # 时间段推断（当前 mtime；EXIF 待加）
+│   │   ├── config.go       # devices.yaml 加载 + 首次运行写出默认
+│   │   └── default.yaml    # 内嵌的出厂默认（go:embed）
+│   ├── mount/              # 跨平台枚举可移动挂载卷（linux/darwin/windows 各一个 build tag 文件）
+│   ├── timestamp/          # EXIF / QuickTime 拍摄时间提取
+│   ├── period/             # 时间段推断（timestamp 优先，mtime 兜底）
 │   ├── template/           # 路径模板解析与渲染
 │   ├── copier/             # 安全拷贝协议——核心逻辑
 │   └── db/                 # SQLite 历史库（modernc.org/sqlite，纯 Go）
@@ -172,7 +209,7 @@ ingest --source /Volumes/SONY_XYZ --target ~/Backups --name "周末骑行" -v
   - `internal/copier/copier.go` — 安全拷贝不变量；不要放松校验步骤
   - `internal/db/db.go` — Schema 是 `UNIQUE(target_path)`；尚无迁移机制
   - `cmd/ingest/main.go` — 全部 CLI 表面
-- **未经明确指示不要做的事**：TUI、EXIF 解析、网络 I/O、YAML 配置——这些都在路线图上（PRD §11）但还没接入。
+- **未经明确指示不要做的事**：TUI、网络 I/O——这些都在路线图上（PRD §11）但还没接入。
 
 ---
 
@@ -182,8 +219,8 @@ ingest --source /Volumes/SONY_XYZ --target ~/Backups --name "周末骑行" -v
 
 | 版本 | 重点 |
 |---|---|
-| **v0.1.0** | TUI 交互、EXIF 时间提取、自动挂载检测、跨平台发布 |
-| **v0.2.0** | YAML 配置、多目标备份、`verify` / `history` 子命令 |
+| **v0.1.0** | TUI 交互（EXIF/QT 提取、跨平台发布、YAML 设备配置、自动挂载检测已在 develop 完成） |
+| **v0.2.0** | 多目标备份、`verify` / `history` 子命令、`devices.yaml` schema 校验 |
 | **v0.3.0** | 代理文件生成（FFmpeg）、多卡队列、剪辑软件 XML 导出、云端归档 |
 | **v1.0.0** | 测试覆盖率 >80%、包管理分发（Homebrew/Scoop） |
 
