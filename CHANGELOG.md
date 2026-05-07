@@ -23,6 +23,12 @@
 - **EXIF / QuickTime 时间提取**：新增 `internal/timestamp` 包；图片（jpg/jpeg/arw/cr2/cr3/nef/dng/heic/tiff）走 EXIF `DateTimeOriginal`，视频（mp4/mov/m4v/mts/m2ts）解析 QuickTime `moov/mvhd` atom 拿 creation_time。`period.Infer` 优先用嵌入时间，提取失败才回退到 `fs.FileInfo.ModTime()`。verbose 模式打印 `(time source: exif=N quicktime=N mtime-fallback=N)`。
 - `internal/timestamp` 与 `internal/period` 加最小单元测试覆盖 QT atom 解析、扩展名分发与 mtime 回退路径。
 - 直接依赖 `github.com/dsoprea/go-exif/v3`，纯 Go 无 CGO，跨平台不影响 release 矩阵。
+- **自动挂载检测**：新增 `internal/mount` 包，跨平台枚举可移动卷：
+  - Linux 解析 `/proc/mounts`，过滤 `/media/<user>/`、`/run/media/<user>/`、`/mnt/` 前缀，丢弃内核虚拟 fstype；
+  - macOS 读 `/Volumes/` 目录条目，排除系统盘（Macintosh HD / Macintosh HD - Data）；
+  - Windows 通过 `golang.org/x/sys/windows` 调 `GetLogicalDrives` + `GetDriveType`，仅取 `DRIVE_REMOVABLE`，再用 `GetVolumeInformation` 拿卷标和 fstype。
+- `--source` 缺省时自动调 `mount.List` + `device.Detect` 评分：0 候选报错、1 候选直采、N 候选交互式数字选择；`--yes` 时自动取置信度最高项。`--source` 显式指定时整段跳过。
+- `internal/mount` 的 Linux 解析分离出 `parseProcMounts(io.Reader)` 便于测试；覆盖虚拟 fstype 过滤、`\040` 八进制反转义、重复挂载点去重。
 
 ## [0.0.1] - 2026-05-06
 

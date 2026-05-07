@@ -43,6 +43,7 @@ go install ./cmd/ingest
 |---|---|
 | `cmd/ingest/` | CLI 入口——只做 flag 解析与流程串联，**不放业务逻辑** |
 | `internal/scanner/` | 遍历源卷，区分媒体文件与 sidecar |
+| `internal/mount/` | 跨平台枚举可移动挂载卷；按 GOOS 分文件（linux/darwin/windows），调用方再用 `device.Detect` 二次过滤 |
 | `internal/device/` | 设备识别匹配器 + YAML 加载；出厂默认在 `default.yaml`（go:embed），用户配置在 `~/.config/ingest/devices.yaml` |
 | `internal/period/` | 时间段推断；当前基于 mtime，预留 EXIF 接入位 |
 | `internal/template/` | 路径模板解析与渲染 |

@@ -4,7 +4,7 @@
 
 `ingest` 是一个跨平台的命令行工具，用于把相机 SD 卡里的素材按结构归档到本地，并保证字节级校验、可重复执行。它面向多设备影像创作者（微单 + 无人机 + 运动相机），目标是把 `rsync` 的可靠性和 Kocard / Hedge 这类商业工具的易用性结合起来——但完全开源、可定制。
 
-**当前状态**：`v0.0.1`（测试版本，Phase 1 MVP）已发布；`develop` 分支已陆续合入 YAML 设备配置、EXIF/QuickTime 时间提取、跨平台 release 流水线，将在 v0.1.0 一并发布。TUI、自动挂载检测仍在路线图上。完整规格见 [PRD.md](./PRD.md)。
+**当前状态**：`v0.0.1`（测试版本，Phase 1 MVP）已发布；`develop` 分支已陆续合入 YAML 设备配置、EXIF/QuickTime 时间提取、跨平台 release 流水线、自动挂载检测，将在 v0.1.0 一并发布。TUI 交互仍在路线图上。完整规格见 [PRD.md](./PRD.md)。
 
 ---
 
@@ -96,7 +96,7 @@ ingest --source /Volumes/SONY_XYZ --target ~/Backups --name "周末骑行" -v
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `-s`, `--source` | _（必填）_ | 源路径（挂载点 / 目录） |
+| `-s`, `--source` | _（自动检测）_ | 源路径（挂载点 / 目录）。省略时枚举系统挂载点 + 设备规则匹配，1 个候选直采，多个候选交互式选 |
 | `-t`, `--target` | `~/Backups` | 目标根目录 |
 | `-n`, `--name` | _（必填）_ | 事件名称，对应 `{event_name}` |
 | `--device` | _（自动）_ | 强制指定设备 ID，如 `zve10m2`、`pocket3` |
@@ -174,6 +174,7 @@ devices:
 │   ├── device/             # 设备识别规则与匹配器
 │   │   ├── config.go       # devices.yaml 加载 + 首次运行写出默认
 │   │   └── default.yaml    # 内嵌的出厂默认（go:embed）
+│   ├── mount/              # 跨平台枚举可移动挂载卷（linux/darwin/windows 各一个 build tag 文件）
 │   ├── timestamp/          # EXIF / QuickTime 拍摄时间提取
 │   ├── period/             # 时间段推断（timestamp 优先，mtime 兜底）
 │   ├── template/           # 路径模板解析与渲染
@@ -208,7 +209,7 @@ devices:
   - `internal/copier/copier.go` — 安全拷贝不变量；不要放松校验步骤
   - `internal/db/db.go` — Schema 是 `UNIQUE(target_path)`；尚无迁移机制
   - `cmd/ingest/main.go` — 全部 CLI 表面
-- **未经明确指示不要做的事**：TUI、自动挂载检测、网络 I/O——这些都在路线图上（PRD §11）但还没接入。
+- **未经明确指示不要做的事**：TUI、网络 I/O——这些都在路线图上（PRD §11）但还没接入。
 
 ---
 
@@ -218,7 +219,7 @@ devices:
 
 | 版本 | 重点 |
 |---|---|
-| **v0.1.0** | TUI 交互、自动挂载检测（EXIF/QT 提取、跨平台发布、YAML 设备配置已在 develop 完成） |
+| **v0.1.0** | TUI 交互（EXIF/QT 提取、跨平台发布、YAML 设备配置、自动挂载检测已在 develop 完成） |
 | **v0.2.0** | 多目标备份、`verify` / `history` 子命令、`devices.yaml` schema 校验 |
 | **v0.3.0** | 代理文件生成（FFmpeg）、多卡队列、剪辑软件 XML 导出、云端归档 |
 | **v1.0.0** | 测试覆盖率 >80%、包管理分发（Homebrew/Scoop） |

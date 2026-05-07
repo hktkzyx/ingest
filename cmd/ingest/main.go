@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/hktkzyx/ingest/internal/copier"
 	"github.com/hktkzyx/ingest/internal/db"
 	"github.com/hktkzyx/ingest/internal/device"
+	"github.com/hktkzyx/ingest/internal/mount"
 	"github.com/hktkzyx/ingest/internal/period"
 	"github.com/hktkzyx/ingest/internal/scanner"
 	"github.com/hktkzyx/ingest/internal/template"
@@ -103,16 +106,6 @@ func devicesCmd() *cobra.Command {
 }
 
 func runIngest(_ *cobra.Command, _ []string) error {
-	if flagSource == "" {
-		return fmt.Errorf("--source is required (auto-detection of mounted volumes is not implemented yet)")
-	}
-	src, err := expandPath(flagSource)
-	if err != nil {
-		return fmt.Errorf("--source: %w", err)
-	}
-	if st, err := os.Stat(src); err != nil || !st.IsDir() {
-		return fmt.Errorf("source not a directory: %s", src)
-	}
 	target, err := expandPath(flagTarget)
 	if err != nil {
 		return fmt.Errorf("--target: %w", err)
@@ -127,6 +120,11 @@ func runIngest(_ *cobra.Command, _ []string) error {
 	}
 	if len(rules) == 0 {
 		return fmt.Errorf("no device rules in %s — add at least one entry", devicesPath)
+	}
+
+	src, err := resolveSource(rules)
+	if err != nil {
+		return err
 	}
 
 	files, err := scanner.Scan(src)
@@ -220,6 +218,90 @@ func runIngest(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("%d files failed", failed)
 	}
 	return nil
+}
+
+// resolveSource 决定要扫的源路径。优先级：显式 --source > 自动检测。
+//
+// 自动检测时枚举系统挂载点（mount.List），对每个候选跑 device.Detect 评分，
+// 按置信度排序后：
+//   - 0 个匹配 → 报错让用户手动指定
+//   - 1 个匹配 → 直接采用
+//   - N 个匹配 → 列表 + 交互式数字选择；--yes 时自动取最高分
+func resolveSource(rules []device.Rule) (string, error) {
+	if flagSource != "" {
+		src, err := expandPath(flagSource)
+		if err != nil {
+			return "", fmt.Errorf("--source: %w", err)
+		}
+		if st, err := os.Stat(src); err != nil || !st.IsDir() {
+			return "", fmt.Errorf("source not a directory: %s", src)
+		}
+		return src, nil
+	}
+
+	vols, err := mount.List()
+	if err != nil {
+		return "", fmt.Errorf("auto-detect mounts: %w (pass --source explicitly)", err)
+	}
+	type candidate struct {
+		Volume     mount.Volume
+		Match      *device.Match
+		Confidence float64
+	}
+	var matches []candidate
+	for _, v := range vols {
+		m := device.Detect(rules, v.Path, v.Label)
+		if m == nil {
+			continue
+		}
+		matches = append(matches, candidate{Volume: v, Match: m, Confidence: m.Confidence})
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no removable volumes matched any device rule; pass --source explicitly")
+	case 1:
+		c := matches[0]
+		fmt.Printf("Auto-detected source: %s (%s, confidence %.2f via %s)\n",
+			c.Volume.Path, c.Match.Rule.Name, c.Confidence, c.Match.Reason)
+		return c.Volume.Path, nil
+	}
+
+	// 多个候选：按置信度降序展示。
+	for i := 0; i < len(matches); i++ {
+		for j := i + 1; j < len(matches); j++ {
+			if matches[j].Confidence > matches[i].Confidence {
+				matches[i], matches[j] = matches[j], matches[i]
+			}
+		}
+	}
+	if flagYes {
+		c := matches[0]
+		fmt.Printf("Auto-selected (--yes): %s (%s, confidence %.2f)\n",
+			c.Volume.Path, c.Match.Rule.Name, c.Confidence)
+		return c.Volume.Path, nil
+	}
+
+	fmt.Println("Multiple removable volumes matched device rules:")
+	for i, c := range matches {
+		fmt.Printf("  [%d] %-40s %s (confidence %.2f, %s)\n",
+			i+1, c.Volume.Path, c.Match.Rule.Name, c.Confidence, c.Match.Reason)
+	}
+	fmt.Print("Pick one [1]: ")
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("read selection: %w", err)
+	}
+	line = strings.TrimSpace(line)
+	idx := 1
+	if line != "" {
+		n, err := strconv.Atoi(line)
+		if err != nil || n < 1 || n > len(matches) {
+			return "", fmt.Errorf("invalid selection %q", line)
+		}
+		idx = n
+	}
+	return matches[idx-1].Volume.Path, nil
 }
 
 func resolveDevice(src string, rules []device.Rule) (id, name string, err error) {
