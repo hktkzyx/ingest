@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+## [0.1.0-alpha.1] - 2026-05-08
+
+第一个 alpha 预发布。MVP 之上完成 Phase 1 ergonomics 三件套（YAML 设备配置、EXIF/QT 时间提取、自动挂载检测）以及跨平台 release 流水线。TUI 推迟到 v0.2.0。
+
 ### Changed
 
 - **设备识别规则不再写死**：内置 `BuiltinRules` 已删除。规则从配置文件 `$XDG_CONFIG_HOME/ingest/devices.yaml`（默认 `~/.config/ingest/devices.yaml`）加载；首次运行时自动把内嵌的出厂默认（Sony / DJI Pocket3）写到该路径，之后所有读取都走文件，可任意编辑增删。
@@ -55,5 +59,6 @@
 - 没有 TUI；事件名 `--name` 必填，无交互式提示
 - 测试套件计划在 Phase 4 补齐，当前仓库无单元测试
 
-[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.1...HEAD
+[0.1.0-alpha.1]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.1
 [0.0.1]: https://github.com/hktkzyx/ingest/releases/tag/v0.0.1
