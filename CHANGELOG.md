@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+## [0.1.0-alpha.2] - 2026-05-08
+
+第二个 alpha 预发布。在 alpha.1 上补齐多事件分段、交互式段编辑、设备识别确认 prompt，并修正两个出厂识别规则与 partial directory 评分阈值。
+
 ### Fixed
 
 - **SONY ZVE10M2 默认识别规则收紧**：原来 `directories: [PRIVATE/SONY, DCIM]` 太宽——杂牌 U 盘只要有 `DCIM` 就会被部分命中误判（如 v0.1.0-alpha.1 上 G:\ 被打成 confidence 0.60）。改为 `[PRIVATE/M4ROOT, DCIM/100MSDCF]`，对应 ZVE10M2 实际卡布局（视频在 `M4ROOT/CLIP`、图片在 `DCIM/100MSDCF`）。
@@ -90,6 +94,7 @@
 - 没有 TUI；事件名 `--name` 必填，无交互式提示
 - 测试套件计划在 Phase 4 补齐，当前仓库无单元测试
 
-[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.2...HEAD
+[0.1.0-alpha.2]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.1
 [0.0.1]: https://github.com/hktkzyx/ingest/releases/tag/v0.0.1
