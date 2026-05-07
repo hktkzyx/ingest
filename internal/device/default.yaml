@@ -1,0 +1,34 @@
+# ingest 设备识别规则
+#
+# 这是 ingest 首次运行时自动写出的出厂默认配置。可以随意修改、增删
+# 设备条目。每次运行时 ingest 都会重新读取本文件——不需要重启什么。
+#
+# 字段说明：
+#   id            必填，设备唯一标识，CLI 用 --device <id> 强指定
+#   name          人类可读名称；默认模板里 {device_name} 即此值
+#                 （空格会被自动替换为下划线，避免目录名带空格）
+#   manufacturer  可选，厂商名，仅用于 `ingest devices list` 展示
+#   detect:       三档置信度的识别规则，命中任意一档即视为匹配
+#     volume_labels  卷标包含任一字符串（不区分大小写）→ 0.90
+#     directories    给出的目录全部存在 → 0.80
+#     file_patterns  根目录或下两层 glob 命中 → 0.70
+#
+# 多个设备同时匹配时取最高置信度。
+version: "1"
+
+devices:
+  - id: zve10m2
+    name: "SONY ZVE10M2"
+    manufacturer: "SONY"
+    detect:
+      volume_labels: ["SONY"]
+      directories: ["PRIVATE/SONY", "DCIM"]
+      file_patterns: ["C*.MP4", "C*.MTS", "DSC*.ARW", "DSC*.JPG"]
+
+  - id: pocket3
+    name: "DJI Pocket3"
+    manufacturer: "DJI"
+    detect:
+      volume_labels: ["DJI"]
+      directories: ["DCIM/100MEDIA"]
+      file_patterns: ["DJI_*.MP4"]

@@ -21,24 +21,11 @@ type Match struct {
 	Reason     string
 }
 
-var BuiltinRules = []Rule{
-	{
-		ID: "zve10m2", Name: "Sony ZV-E10M2", Manufacturer: "Sony",
-		VolumeLabels: []string{"SONY"},
-		Directories:  []string{"PRIVATE/SONY", "DCIM"},
-		FilePatterns: []string{"C*.MP4", "C*.MTS", "DSC*.ARW", "DSC*.JPG"},
-	},
-	{
-		ID: "pocket3", Name: "DJI Pocket3", Manufacturer: "DJI",
-		VolumeLabels: []string{"DJI"},
-		Directories:  []string{"DCIM/100MEDIA"},
-		FilePatterns: []string{"DJI_*.MP4"},
-	},
-}
-
-func Detect(volumePath, volumeLabel string) *Match {
+// Detect 在给定规则集合中挑置信度最高的匹配；无匹配返回 nil。
+// 规则来源由调用方决定（通常是 LoadOrInit 加载的 YAML 配置）。
+func Detect(rules []Rule, volumePath, volumeLabel string) *Match {
 	var best *Match
-	for _, r := range BuiltinRules {
+	for _, r := range rules {
 		m := score(r, volumePath, volumeLabel)
 		if m == nil {
 			continue

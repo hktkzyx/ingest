@@ -43,7 +43,7 @@ go install ./cmd/ingest
 |---|---|
 | `cmd/ingest/` | CLI 入口——只做 flag 解析与流程串联，**不放业务逻辑** |
 | `internal/scanner/` | 遍历源卷，区分媒体文件与 sidecar |
-| `internal/device/` | 设备识别规则与匹配器；新增内置设备从这里加 |
+| `internal/device/` | 设备识别匹配器 + YAML 加载；出厂默认在 `default.yaml`（go:embed），用户配置在 `~/.config/ingest/devices.yaml` |
 | `internal/period/` | 时间段推断；当前基于 mtime，预留 EXIF 接入位 |
 | `internal/template/` | 路径模板解析与渲染 |
 | `internal/copier/` | 安全拷贝协议——**关键路径，谨慎修改** |
@@ -156,28 +156,46 @@ docs(readme): 补充 --template 语法
 
 ---
 
-## 增加内置设备规则
+## 设备规则
 
-编辑 `internal/device/device.go`，往 `BuiltinRules` 末尾追加：
+设备规则是**外置 YAML 配置**，不是源码。运行时优先级：
 
-```go
-{
-    ID: "osmoaction4", Name: "DJI Osmo Action 4", Manufacturer: "DJI",
-    VolumeLabels: []string{"OSMO"},
-    Directories:  []string{"DCIM"},
-    FilePatterns: []string{"DJI_*.MP4"},
-},
+1. `--devices <path>` flag
+2. `$XDG_CONFIG_HOME/ingest/devices.yaml`
+3. `~/.config/ingest/devices.yaml`
+
+文件不存在时，`device.LoadOrInit` 会把 `internal/device/default.yaml`（通过 `go:embed` 内嵌）写到该路径，然后再读。
+
+### 用户自加规则
+
+普通用户直接编辑自己机器上的 `~/.config/ingest/devices.yaml` 即可：
+
+```yaml
+- id: osmoaction4
+  name: "DJI Osmo Action 4"
+  manufacturer: "DJI"
+  detect:
+    volume_labels: ["OSMO"]
+    directories: ["DCIM"]
+    file_patterns: ["DJI_*.MP4"]
 ```
-
-然后验证：
 
 ```bash
-go build ./... && ingest devices list
+ingest devices list   # 验证条目被解析
 ```
 
-置信度排序逻辑（卷标 → 目录结构 → 文件名 → 部分目录命中）在 `score()` 函数里。加新字段前，先确认现有匹配维度是否已经够用。
+### 修改出厂默认
 
-YAML 外置设备规则（`devices.yaml`）属于 PRD FR-012 的范畴。
+只有当一条规则**值得对所有用户生效**时才动 `internal/device/default.yaml`。注意：用户首次运行后这份默认就被复制到他们的 config 路径了——之后修改 `default.yaml` 不会回灌到老用户。所以：
+
+- 新增条目：直接追加，老用户需要手动同步（或删掉本地文件让它重新生成）
+- 修改/删除已有条目：要在 PR 描述里说明影响
+
+### 匹配逻辑
+
+置信度排序（卷标 0.90 → 目录全中 0.80 → 文件名 0.70 → 部分目录 0.50–0.80）在 `internal/device/device.go` 的 `score()` 函数里。加新匹配维度前，先确认现有三档不够用。
+
+YAML schema 校验（必填字段、空数组检查）属于 PRD FR-012 后续工作。
 
 ---
 
