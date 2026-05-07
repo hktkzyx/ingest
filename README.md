@@ -160,9 +160,11 @@ devices:
     manufacturer: "SONY" # 仅展示用
     detect:
       volume_labels: ["SONY"]                               # 卷标包含任一 → 0.90
-      directories:   ["PRIVATE/SONY", "DCIM"]               # 全部命中 → 0.80
-      file_patterns: ["C*.MP4", "C*.MTS", "DSC*.ARW"]       # 根目录或下两层 glob → 0.70
+      directories:   ["PRIVATE/M4ROOT", "DCIM/100MSDCF"]    # 全部命中 → 0.80
+      file_patterns: ["C*.MP4", "DSC*.ARW", "DSC*.JPG"]     # 根目录或下两层 glob → 0.70
 ```
+
+> 提示：`directories` 应该列**这台设备特有的**目录组合（避免 `DCIM` 这种通用名）。partial directory 档要求至少 2 个目录命中，单个偶然命中不会触发误判。
 
 多设备同时匹配取置信度最高者。要换文件位置：`ingest --devices /path/to/your.yaml ...`。
 

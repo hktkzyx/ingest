@@ -56,7 +56,10 @@ func score(r Rule, root, label string) *Match {
 	if matchesAny(r.FilePatterns, root) {
 		return &Match{Rule: r, Confidence: 0.7, Reason: "file pattern"}
 	}
-	if dirHits > 0 {
+	// 部分目录命中：要求至少 2 个目录命中才回退到此档，避免单个偶然命中
+	// （比如杂牌 U 盘上有个 DCIM）造成的 false positive。规则只配 1 个目录
+	// 时不参与 partial 评分（要么全中，要么不中）。
+	if dirHits >= 2 {
 		return &Match{Rule: r, Confidence: 0.5 + 0.1*float64(dirHits), Reason: "partial directory"}
 	}
 	return nil

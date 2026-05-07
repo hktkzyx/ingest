@@ -6,6 +6,19 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **SONY ZVE10M2 默认识别规则收紧**：原来 `directories: [PRIVATE/SONY, DCIM]` 太宽——杂牌 U 盘只要有 `DCIM` 就会被部分命中误判（如 v0.1.0-alpha.1 上 G:\ 被打成 confidence 0.60）。改为 `[PRIVATE/M4ROOT, DCIM/100MSDCF]`，对应 ZVE10M2 实际卡布局（视频在 `M4ROOT/CLIP`、图片在 `DCIM/100MSDCF`）。
+- **DJI Pocket3 默认识别规则修正**：原来 `directories: [DCIM/100MEDIA]` 完全对不上——Pocket 3 实际是 `DCIM/DJI_001/`（序号会滚动）+ `MISC/IDX/` + `MISC/THM/`。改为 `[MISC/THM, MISC/IDX]`，避开会变的 `DJI_NNN` 序号；file_patterns 加上 `DJI_*.JPG` 和 `DJI_*.WAV` 覆盖照片和音频。
+- **`device.score` 部分命中阈值提高**：原来 `dirHits > 0` 就给 0.5+ 评分；改为至少命中 2 个目录才回落 partial 档，避免单个偶然命中触发 false positive。
+
+### Note for existing users
+
+已运行过 v0.1.0-alpha.1 的用户，`~/.config/ingest/devices.yaml` 已经写出，更新出厂默认不会自动回灌。要拿到新规则有两种办法：
+
+1. 直接编辑 `~/.config/ingest/devices.yaml`，把 ZVE10M2 的 `directories` 改成 `["PRIVATE/M4ROOT", "DCIM/100MSDCF"]`
+2. 删除 `~/.config/ingest/devices.yaml`，下次运行时会重新写出新版默认
+
 ### Added
 
 - **多事件分段**：`period.Segments(files, gapDays)` 把文件按拍摄时间相邻聚成段；相邻文件日期间隔 ≤ `gap_days` 视为同段。

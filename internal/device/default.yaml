@@ -22,13 +22,28 @@ devices:
     manufacturer: "SONY"
     detect:
       volume_labels: ["SONY"]
-      directories: ["PRIVATE/SONY", "DCIM"]
-      file_patterns: ["C*.MP4", "C*.MTS", "DSC*.ARW", "DSC*.JPG"]
+      # 卡上的实际结构（截屏验证）：
+      #   DCIM/100MSDCF/        图片：DSC*.JPG / DSC*.ARW
+      #   PRIVATE/M4ROOT/CLIP/  视频主码流：C*.MP4
+      #   PRIVATE/M4ROOT/SUB/   视频代理流（缩略低码率版本）
+      #   PRIVATE/M4ROOT/THMBNL/  缩略图
+      #   PRIVATE/SONY/         相机内固件 / LUT，不是文件指纹的核心
+      # 用 PRIVATE/M4ROOT + DCIM/100MSDCF 双指纹避免对杂牌 U 盘误判
+      # （仅有 DCIM 的卡很常见，不是 ZVE10M2 的强证据）。
+      directories: ["PRIVATE/M4ROOT", "DCIM/100MSDCF"]
+      file_patterns: ["C*.MP4", "DSC*.ARW", "DSC*.JPG"]
 
   - id: pocket3
     name: "DJI Pocket3"
     manufacturer: "DJI"
     detect:
       volume_labels: ["DJI"]
-      directories: ["DCIM/100MEDIA"]
-      file_patterns: ["DJI_*.MP4"]
+      # 卡上的实际结构（截屏验证）：
+      #   DCIM/DJI_001/         视频 / 照片 / 音频；序号会滚动到 DJI_002 等
+      #   MISC/IDX/             索引文件
+      #   MISC/THM/DJI_001/     缩略图
+      # DJI_NNN 序号会变，不放进 directories 里；用 MISC/THM + MISC/IDX
+      # 作 DJI 专属指纹——别的相机一般没有顶层 MISC 目录。
+      directories: ["MISC/THM", "MISC/IDX"]
+      # file_patterns 走 root + 1 + 2 层 glob，DCIM/DJI_001/DJI_0001.MP4 能命中
+      file_patterns: ["DJI_*.MP4", "DJI_*.JPG", "DJI_*.WAV"]
