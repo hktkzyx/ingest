@@ -232,15 +232,25 @@ go test -race ./...
 
 ## 发布
 
-仅维护者操作。
+仅维护者操作。二进制由 GitHub Actions 在 tag push 时通过 goreleaser 自动构建，见 `.github/workflows/release.yml` + `.goreleaser.yaml`。
 
 1. 从 `develop` 切 `release/<版本>`
-2. 改 `cmd/ingest/main.go` 里的 `version`
+2. 改 `cmd/ingest/main.go` 里的 `version`（仅作 fallback；正式 build 时 ldflags 会用 tag 名覆盖）
 3. 更新 `CHANGELOG.md`（Keep a Changelog 格式）
 4. PR → `main`，merge commit 合入
 5. 打签名 annotated tag：`git tag -s v<版本> -m "v<版本>"`，再 `git push --tags`
-6. 把 `main` 回流到 `develop`（或直接把 release 分支合入 `develop`）
-7. 构建二进制产物：`goreleaser`（规划中）或按平台 `go build`
+6. 等 `release` workflow 跑完，到 GitHub Releases 页面检查草稿 release 后发布
+7. 把 `main` 回流到 `develop`（或直接把 release 分支合入 `develop`）
+
+### 本地预演 release 构建
+
+```bash
+go install github.com/goreleaser/goreleaser/v2@latest
+goreleaser check                                       # 校验配置
+goreleaser release --snapshot --clean --skip=publish   # 在 dist/ 出 5 平台产物
+```
+
+snapshot 产物 version 形如 `0.0.1-snapshot+<short-sha>`，不会推到 GitHub。
 
 ---
 

@@ -20,11 +20,21 @@
 
 ## 安装
 
-### 前置要求
+### 预编译二进制（推荐）
 
-- Go **1.24+**（构建会自动升到 `go.mod` 中固定的 toolchain 版本）
+到 [Releases](https://github.com/hktkzyx/ingest/releases) 下载对应平台的归档（Linux / macOS / Windows，amd64 + arm64），解包后把 `ingest` 放到 `PATH` 即可。每个 release 附 `checksums.txt` 用于校验。
+
+```bash
+# 示例：Linux x86_64
+curl -L https://github.com/hktkzyx/ingest/releases/latest/download/ingest_<版本>_linux_x86_64.tar.gz | tar xz
+sudo mv ingest /usr/local/bin/
+```
+
+> v0.0.1 是手工发布、暂未提供二进制；自 v0.1.0 起由 goreleaser 自动构建。
 
 ### 从源码安装
+
+需要 Go **1.24+**（构建会自动升到 `go.mod` 中固定的 toolchain 版本）。
 
 ```bash
 git clone https://github.com/hktkzyx/ingest.git

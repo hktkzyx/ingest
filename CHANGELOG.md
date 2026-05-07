@@ -17,6 +17,9 @@
 
 - `--devices <path>` 全局 flag，覆盖默认配置文件位置。
 - 直接依赖 `gopkg.in/yaml.v3`，用于 `devices.yaml` 解析。
+- **跨平台 release 流水线**：`.goreleaser.yaml` + `.github/workflows/release.yml`，tag push (`v*.*.*`) 触发，自动构建 `linux/amd64,arm64` + `darwin/amd64,arm64` + `windows/amd64` 二进制并发草稿 release，附 `checksums.txt`。
+- **CI workflow**（`.github/workflows/ci.yml`）：PR 与 push 触发，三平台跑 `go vet/build/test` + `goreleaser check` + snapshot single-target build。
+- 构建注入 version：`-X main.version={{.Version}}` ldflags，正式版 `ingest version` 显示 tag 名。
 
 ## [0.0.1] - 2026-05-06
 
