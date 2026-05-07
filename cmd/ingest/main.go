@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -268,11 +267,16 @@ func resolvePeriod(files []scanner.File) (period.Period, error) {
 		}
 		return p, nil
 	}
-	infos := make([]fs.FileInfo, 0, len(files))
+	pfiles := make([]period.File, 0, len(files))
 	for _, f := range files {
-		infos = append(infos, f.Info)
+		pfiles = append(pfiles, period.File{Path: f.Path, Info: f.Info})
 	}
-	return period.Infer(infos), nil
+	p, stats := period.Infer(pfiles)
+	if flagVerbose {
+		fmt.Printf("(time source: exif=%d quicktime=%d mtime-fallback=%d)\n",
+			stats.FromExif, stats.FromQuickTime, stats.FromMtime)
+	}
+	return p, nil
 }
 
 func optionalEnd(p period.Period) string {

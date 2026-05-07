@@ -20,6 +20,9 @@
 - **跨平台 release 流水线**：`.goreleaser.yaml` + `.github/workflows/release.yml`，tag push (`v*.*.*`) 触发，自动构建 `linux/amd64,arm64` + `darwin/amd64,arm64` + `windows/amd64` 二进制并发草稿 release，附 `checksums.txt`。
 - **CI workflow**（`.github/workflows/ci.yml`）：PR 与 push 触发，三平台跑 `go vet/build/test` + `goreleaser check` + snapshot single-target build。
 - 构建注入 version：`-X main.version={{.Version}}` ldflags，正式版 `ingest version` 显示 tag 名。
+- **EXIF / QuickTime 时间提取**：新增 `internal/timestamp` 包；图片（jpg/jpeg/arw/cr2/cr3/nef/dng/heic/tiff）走 EXIF `DateTimeOriginal`，视频（mp4/mov/m4v/mts/m2ts）解析 QuickTime `moov/mvhd` atom 拿 creation_time。`period.Infer` 优先用嵌入时间，提取失败才回退到 `fs.FileInfo.ModTime()`。verbose 模式打印 `(time source: exif=N quicktime=N mtime-fallback=N)`。
+- `internal/timestamp` 与 `internal/period` 加最小单元测试覆盖 QT atom 解析、扩展名分发与 mtime 回退路径。
+- 直接依赖 `github.com/dsoprea/go-exif/v3`，纯 Go 无 CGO，跨平台不影响 release 矩阵。
 
 ## [0.0.1] - 2026-05-06
 
