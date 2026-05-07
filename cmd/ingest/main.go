@@ -1,21 +1,21 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/hktkzyx/ingest/internal/config"
 	"github.com/hktkzyx/ingest/internal/copier"
 	"github.com/hktkzyx/ingest/internal/db"
 	"github.com/hktkzyx/ingest/internal/device"
 	"github.com/hktkzyx/ingest/internal/mount"
 	"github.com/hktkzyx/ingest/internal/period"
+	"github.com/hktkzyx/ingest/internal/prompt"
 	"github.com/hktkzyx/ingest/internal/scanner"
 	"github.com/hktkzyx/ingest/internal/template"
 )
@@ -34,6 +34,8 @@ var (
 	flagTemplate    string
 	flagDBPath      string
 	flagDevicesPath string
+	flagConfigPath  string
+	flagGapDays     int
 	flagDryRun      bool
 	flagYes         bool
 	flagVerbose     bool
@@ -54,17 +56,20 @@ func rootCmd() *cobra.Command {
 	}
 	cmd.PersistentFlags().StringVar(&flagDevicesPath, "devices", device.DefaultConfigPath(),
 		"path to devices.yaml (auto-created with built-in defaults if missing)")
+	cmd.PersistentFlags().StringVar(&flagConfigPath, "config", config.DefaultConfigPath(),
+		"path to config.yaml (auto-created with built-in defaults if missing)")
 
 	cmd.Flags().StringVarP(&flagSource, "source", "s", "", "source path (mounted volume)")
 	cmd.Flags().StringVarP(&flagTarget, "target", "t", defaultTarget(), "target root directory")
-	cmd.Flags().StringVarP(&flagName, "name", "n", "", "event name")
-	cmd.Flags().StringVar(&flagDevice, "device", "", "force device id")
-	cmd.Flags().StringVar(&flagFrom, "from", "", "period start (YYYY-MM-DD)")
-	cmd.Flags().StringVar(&flagTo, "to", "", "period end (YYYY-MM-DD)")
+	cmd.Flags().StringVarP(&flagName, "name", "n", "", "event name (single segment only)")
+	cmd.Flags().StringVar(&flagDevice, "device", "", "force device id, skipping detection")
+	cmd.Flags().StringVar(&flagFrom, "from", "", "force period start (YYYY-MM-DD), forces single segment")
+	cmd.Flags().StringVar(&flagTo, "to", "", "force period end (YYYY-MM-DD), forces single segment")
 	cmd.Flags().StringVar(&flagTemplate, "template", defaultTemplate, "path template")
 	cmd.Flags().StringVar(&flagDBPath, "db", defaultDB(), "history database path")
+	cmd.Flags().IntVar(&flagGapDays, "gap-days", -1, "consecutive day gap to merge into one segment (overrides config.yaml)")
 	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "preview only, do not copy")
-	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "skip confirmation prompts")
+	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "accept all prompts (auto-pick highest, accept detected device)")
 	cmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "verbose output")
 
 	cmd.AddCommand(versionCmd(), devicesCmd())
@@ -106,6 +111,8 @@ func devicesCmd() *cobra.Command {
 }
 
 func runIngest(_ *cobra.Command, _ []string) error {
+	io := prompt.NewStdio(os.Stdin, os.Stdout)
+
 	target, err := expandPath(flagTarget)
 	if err != nil {
 		return fmt.Errorf("--target: %w", err)
@@ -113,6 +120,18 @@ func runIngest(_ *cobra.Command, _ []string) error {
 	devicesPath, err := expandPath(flagDevicesPath)
 	if err != nil {
 		return fmt.Errorf("--devices: %w", err)
+	}
+	configPath, err := expandPath(flagConfigPath)
+	if err != nil {
+		return fmt.Errorf("--config: %w", err)
+	}
+	settings, err := config.LoadOrInit(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	gapDays := settings.GapDays
+	if flagGapDays >= 0 {
+		gapDays = flagGapDays
 	}
 	rules, err := device.LoadOrInit(devicesPath)
 	if err != nil {
@@ -122,7 +141,7 @@ func runIngest(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("no device rules in %s — add at least one entry", devicesPath)
 	}
 
-	src, err := resolveSource(rules)
+	src, err := resolveSource(io, rules)
 	if err != nil {
 		return err
 	}
@@ -136,88 +155,201 @@ func runIngest(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("Scanned %d files in %s\n", len(files), src)
 
-	deviceID, deviceName, err := resolveDevice(src, rules)
+	deviceID, deviceName, err := resolveDevice(io, src, rules)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Device: %s (%s)\n", deviceID, deviceName)
 
-	p, err := resolvePeriod(files)
+	byPath := make(map[string]scanner.File, len(files))
+	for _, f := range files {
+		byPath[f.Path] = f
+	}
+
+	segments, err := buildSegments(files, gapDays)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Period: %s → %s\n",
-		p.Start.Format("2006-01-02"), p.End.Format("2006-01-02"))
-
-	if flagName == "" {
-		return fmt.Errorf("--name is required (interactive prompt not implemented yet)")
+	if flagVerbose {
+		fmt.Printf("Found %d segment(s) with gap_days=%d\n", len(segments), gapDays)
 	}
 
-	rendered, err := template.Render(flagTemplate, template.Context{
-		DateStart:  p.Start.Format("20060102"),
-		DateEnd:    optionalEnd(p),
-		EventName:  flagName,
-		DeviceID:   deviceID,
-		DeviceName: strings.ReplaceAll(deviceName, " ", "_"),
-	})
+	plans, err := planSegments(io, segments, byPath)
 	if err != nil {
-		return fmt.Errorf("template: %w", err)
-	}
-	targetDir := filepath.Join(target, rendered)
-	fmt.Printf("Target: %s\n", targetDir)
-
-	if flagDryRun {
-		for _, f := range files {
-			fmt.Printf("  [dry-run] %s → %s\n",
-				f.RelPath, filepath.Join(targetDir, filepath.Base(f.Path)))
-		}
-		return nil
+		return err
 	}
 
 	dbPath, err := expandPath(flagDBPath)
 	if err != nil {
 		return fmt.Errorf("--db: %w", err)
 	}
-	store, err := db.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("open db: %w", err)
-	}
-	defer store.Close()
-
-	var copied, skipped, failed int
-	var totalBytes int64
-	start := time.Now()
-	for _, f := range files {
-		dst := filepath.Join(targetDir, filepath.Base(f.Path))
-		out := copier.SafeCopy(f.Path, dst, deviceID, "", store)
-		switch out.Result {
-		case copier.ResultCopied:
-			copied++
-			totalBytes += out.Bytes
-			if flagVerbose {
-				fmt.Printf("  copied  %s (%s)\n", f.RelPath, out.Hash)
-			}
-		case copier.ResultSkipped:
-			skipped++
-			if flagVerbose {
-				fmt.Printf("  skip    %s\n", f.RelPath)
-			}
-		case copier.ResultFailed:
-			failed++
-			fmt.Fprintf(os.Stderr, "  FAILED  %s: %v\n", f.RelPath, out.Err)
+	var store *db.DB
+	if !flagDryRun {
+		store, err = db.Open(dbPath)
+		if err != nil {
+			return fmt.Errorf("open db: %w", err)
 		}
+		defer store.Close()
 	}
-	elapsed := time.Since(start).Round(time.Millisecond)
+
+	var totalCopied, totalSkipped, totalFailed int
+	var totalBytes int64
+	startAll := time.Now()
+	for i, plan := range plans {
+		rendered, err := template.Render(flagTemplate, template.Context{
+			DateStart:  plan.Start.Format("20060102"),
+			DateEnd:    optionalEnd(plan.Period()),
+			EventName:  plan.Name,
+			DeviceID:   deviceID,
+			DeviceName: strings.ReplaceAll(deviceName, " ", "_"),
+		})
+		if err != nil {
+			return fmt.Errorf("template (segment %d): %w", i+1, err)
+		}
+		targetDir := filepath.Join(target, rendered)
+		fmt.Printf("\n[Segment %d/%d] %s\n", i+1, len(plans), targetDir)
+
+		if flagDryRun {
+			for _, f := range plan.Files {
+				fmt.Printf("  [dry-run] %s → %s\n",
+					f.RelPath, filepath.Join(targetDir, filepath.Base(f.Path)))
+			}
+			continue
+		}
+
+		copied, skipped, failed, bytes := copyFiles(plan.Files, targetDir, deviceID, store)
+		totalCopied += copied
+		totalSkipped += skipped
+		totalFailed += failed
+		totalBytes += bytes
+	}
+
+	if flagDryRun {
+		return nil
+	}
+	elapsed := time.Since(startAll).Round(time.Millisecond)
 	mbps := 0.0
 	if elapsed > 0 {
 		mbps = float64(totalBytes) / elapsed.Seconds() / (1024 * 1024)
 	}
 	fmt.Printf("\nDone: %d copied, %d skipped, %d failed in %s (%.1f MB/s)\n",
-		copied, skipped, failed, elapsed, mbps)
-	if failed > 0 {
-		return fmt.Errorf("%d files failed", failed)
+		totalCopied, totalSkipped, totalFailed, elapsed, mbps)
+	if totalFailed > 0 {
+		return fmt.Errorf("%d files failed", totalFailed)
 	}
 	return nil
+}
+
+// segmentPlan 是一个段经过用户确认后的最终拷贝计划。
+type segmentPlan struct {
+	Start, End time.Time
+	Name       string
+	Files      []scanner.File
+}
+
+func (p segmentPlan) Period() period.Period {
+	return period.Period{Start: p.Start, End: p.End}
+}
+
+// buildSegments 把 scanner.File 转成 period.File，按 gapDays 分段。
+// 当 --from/--to 给出时，强制单段（保持向后兼容旧 CLI 行为）。
+func buildSegments(files []scanner.File, gapDays int) ([]period.Segment, error) {
+	if flagFrom != "" || flagTo != "" {
+		var start, end time.Time
+		var err error
+		if flagFrom != "" {
+			start, err = time.ParseInLocation("2006-01-02", flagFrom, time.Local)
+			if err != nil {
+				return nil, fmt.Errorf("--from: %w", err)
+			}
+		}
+		if flagTo != "" {
+			end, err = time.ParseInLocation("2006-01-02", flagTo, time.Local)
+			if err != nil {
+				return nil, fmt.Errorf("--to: %w", err)
+			}
+		}
+		if start.IsZero() {
+			start = end
+		}
+		if end.IsZero() {
+			end = start
+		}
+		pfiles := scannerToPeriod(files)
+		seg := period.Segment{Start: start, End: end, Files: pfiles}
+		for _, f := range files {
+			if f.Info != nil {
+				seg.Bytes += f.Info.Size()
+			}
+		}
+		return []period.Segment{seg}, nil
+	}
+
+	segs, stats := period.Segments(scannerToPeriod(files), gapDays)
+	if flagVerbose {
+		fmt.Printf("(time source: exif=%d quicktime=%d mtime-fallback=%d)\n",
+			stats.FromExif, stats.FromQuickTime, stats.FromMtime)
+	}
+	if len(segs) == 0 {
+		return nil, fmt.Errorf("could not derive any time segment from files")
+	}
+	return segs, nil
+}
+
+func scannerToPeriod(files []scanner.File) []period.File {
+	out := make([]period.File, 0, len(files))
+	for _, f := range files {
+		out = append(out, period.File{Path: f.Path, Info: f.Info})
+	}
+	return out
+}
+
+// planSegments 给每段补上事件名（来自 --name flag 或交互 prompt），并把
+// period.File 列表对回 scanner.File（拷贝阶段需要 RelPath）。
+func planSegments(io prompt.IO, segs []period.Segment, byPath map[string]scanner.File) ([]segmentPlan, error) {
+	if len(segs) > 1 && flagName != "" {
+		return nil, fmt.Errorf("--name is ambiguous with %d auto-detected segments; "+
+			"either run without --name to be prompted per segment, "+
+			"or use --from/--to to force a single segment", len(segs))
+	}
+	if len(segs) > 1 && flagYes && flagName == "" {
+		return nil, fmt.Errorf("multiple segments detected and --yes set; "+
+			"--yes is incompatible with multi-segment ingestion (each segment needs a name)")
+	}
+
+	plans := make([]segmentPlan, 0, len(segs))
+	for i, seg := range segs {
+		var name string
+		start, end := seg.Start, seg.End
+
+		switch {
+		case len(segs) == 1 && flagName != "":
+			name = flagName
+		default:
+			r, err := io.EditSegment(prompt.SegmentEdit{
+				Index: i + 1, Total: len(segs),
+				Start: seg.Start, End: seg.End,
+				FileCount: len(seg.Files), Bytes: seg.Bytes,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("segment %d/%d: %w", i+1, len(segs), err)
+			}
+			name = r.Name
+			start, end = r.Start, r.End
+		}
+
+		segFiles := make([]scanner.File, 0, len(seg.Files))
+		for _, p := range seg.Files {
+			if sf, ok := byPath[p.Path]; ok {
+				segFiles = append(segFiles, sf)
+			}
+		}
+		plans = append(plans, segmentPlan{
+			Start: start, End: end, Name: name,
+			Files: segFiles,
+		})
+	}
+	return plans, nil
 }
 
 // resolveSource 决定要扫的源路径。优先级：显式 --source > 自动检测。
@@ -227,7 +359,7 @@ func runIngest(_ *cobra.Command, _ []string) error {
 //   - 0 个匹配 → 报错让用户手动指定
 //   - 1 个匹配 → 直接采用
 //   - N 个匹配 → 列表 + 交互式数字选择；--yes 时自动取最高分
-func resolveSource(rules []device.Rule) (string, error) {
+func resolveSource(io prompt.IO, rules []device.Rule) (string, error) {
 	if flagSource != "" {
 		src, err := expandPath(flagSource)
 		if err != nil {
@@ -261,12 +393,11 @@ func resolveSource(rules []device.Rule) (string, error) {
 		return "", fmt.Errorf("no removable volumes matched any device rule; pass --source explicitly")
 	case 1:
 		c := matches[0]
-		fmt.Printf("Auto-detected source: %s (%s, confidence %.2f via %s)\n",
+		fmt.Fprintf(io.Out, "Auto-detected source: %s (%s, confidence %.2f via %s)\n",
 			c.Volume.Path, c.Match.Rule.Name, c.Confidence, c.Match.Reason)
 		return c.Volume.Path, nil
 	}
 
-	// 多个候选：按置信度降序展示。
 	for i := 0; i < len(matches); i++ {
 		for j := i + 1; j < len(matches); j++ {
 			if matches[j].Confidence > matches[i].Confidence {
@@ -276,35 +407,35 @@ func resolveSource(rules []device.Rule) (string, error) {
 	}
 	if flagYes {
 		c := matches[0]
-		fmt.Printf("Auto-selected (--yes): %s (%s, confidence %.2f)\n",
+		fmt.Fprintf(io.Out, "Auto-selected (--yes): %s (%s, confidence %.2f)\n",
 			c.Volume.Path, c.Match.Rule.Name, c.Confidence)
 		return c.Volume.Path, nil
 	}
 
-	fmt.Println("Multiple removable volumes matched device rules:")
+	fmt.Fprintln(io.Out, "Multiple removable volumes matched device rules:")
 	for i, c := range matches {
-		fmt.Printf("  [%d] %-40s %s (confidence %.2f, %s)\n",
+		fmt.Fprintf(io.Out, "  [%d] %-40s %s (confidence %.2f, %s)\n",
 			i+1, c.Volume.Path, c.Match.Rule.Name, c.Confidence, c.Match.Reason)
 	}
-	fmt.Print("Pick one [1]: ")
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
+	options := make([]prompt.DeviceOption, 0, len(matches))
+	for _, c := range matches {
+		options = append(options, prompt.DeviceOption{
+			ID: c.Volume.Path, Name: c.Match.Rule.Name, Manufacturer: c.Match.Rule.Manufacturer,
+		})
+	}
+	idx, err := io.PickDevice(options) // 复用 PickDevice 的"输入 1..N"语义
 	if err != nil {
-		return "", fmt.Errorf("read selection: %w", err)
+		return "", err
 	}
-	line = strings.TrimSpace(line)
-	idx := 1
-	if line != "" {
-		n, err := strconv.Atoi(line)
-		if err != nil || n < 1 || n > len(matches) {
-			return "", fmt.Errorf("invalid selection %q", line)
-		}
-		idx = n
-	}
-	return matches[idx-1].Volume.Path, nil
+	return matches[idx].Volume.Path, nil
 }
 
-func resolveDevice(src string, rules []device.Rule) (id, name string, err error) {
+// resolveDevice 决定本次拷贝用哪个设备 ID/Name。优先级：
+//   - --device 显式给出 → 直接用（在 rules 里查 name；查不到时用 id 兜底）
+//   - 自动 detect 命中 → 默认 prompt 用户确认；--yes 跳过 prompt
+//   - prompt 选 list → 列出全部 rules 让用户选
+//   - 自动 detect 未命中 → 提示加 --device 并退出
+func resolveDevice(io prompt.IO, src string, rules []device.Rule) (id, name string, err error) {
 	if flagDevice != "" {
 		for _, r := range rules {
 			if r.ID == flagDevice {
@@ -318,47 +449,58 @@ func resolveDevice(src string, rules []device.Rule) (id, name string, err error)
 	if m == nil {
 		return "", "", fmt.Errorf("could not auto-detect device; pass --device explicitly")
 	}
-	if flagVerbose {
-		fmt.Printf("(matched by %s, confidence %.2f)\n", m.Reason, m.Confidence)
+	if flagYes {
+		return m.Rule.ID, m.Rule.Name, nil
 	}
-	return m.Rule.ID, m.Rule.Name, nil
+	choice, err := io.ConfirmDevice(m.Rule.Name, m.Rule.ID, m.Reason, m.Confidence)
+	if err != nil {
+		return "", "", err
+	}
+	switch choice {
+	case prompt.DeviceAccept:
+		return m.Rule.ID, m.Rule.Name, nil
+	case prompt.DeviceReject:
+		return "", "", fmt.Errorf("device rejected; rerun with --device <id> to override")
+	case prompt.DeviceList:
+		opts := make([]prompt.DeviceOption, 0, len(rules))
+		for _, r := range rules {
+			opts = append(opts, prompt.DeviceOption{ID: r.ID, Name: r.Name, Manufacturer: r.Manufacturer})
+		}
+		idx, err := io.PickDevice(opts)
+		if err != nil {
+			return "", "", err
+		}
+		return rules[idx].ID, rules[idx].Name, nil
+	}
+	return "", "", fmt.Errorf("unhandled device choice")
+}
+
+func copyFiles(files []scanner.File, targetDir, deviceID string, store *db.DB) (copied, skipped, failed int, totalBytes int64) {
+	for _, f := range files {
+		dst := filepath.Join(targetDir, filepath.Base(f.Path))
+		out := copier.SafeCopy(f.Path, dst, deviceID, "", store)
+		switch out.Result {
+		case copier.ResultCopied:
+			copied++
+			totalBytes += out.Bytes
+			if flagVerbose {
+				fmt.Printf("  copied  %s (%s)\n", f.RelPath, out.Hash)
+			}
+		case copier.ResultSkipped:
+			skipped++
+			if flagVerbose {
+				fmt.Printf("  skip    %s\n", f.RelPath)
+			}
+		case copier.ResultFailed:
+			failed++
+			fmt.Fprintf(os.Stderr, "  FAILED  %s: %v\n", f.RelPath, out.Err)
+		}
+	}
+	return
 }
 
 func volumeLabelOf(p string) string {
 	return filepath.Base(strings.TrimRight(p, string(os.PathSeparator)))
-}
-
-func resolvePeriod(files []scanner.File) (period.Period, error) {
-	if flagFrom != "" || flagTo != "" {
-		var p period.Period
-		var err error
-		if flagFrom != "" {
-			if p.Start, err = time.Parse("2006-01-02", flagFrom); err != nil {
-				return p, fmt.Errorf("--from: %w", err)
-			}
-		}
-		if flagTo != "" {
-			if p.End, err = time.Parse("2006-01-02", flagTo); err != nil {
-				return p, fmt.Errorf("--to: %w", err)
-			}
-		} else {
-			p.End = p.Start
-		}
-		if p.Start.IsZero() {
-			p.Start = p.End
-		}
-		return p, nil
-	}
-	pfiles := make([]period.File, 0, len(files))
-	for _, f := range files {
-		pfiles = append(pfiles, period.File{Path: f.Path, Info: f.Info})
-	}
-	p, stats := period.Infer(pfiles)
-	if flagVerbose {
-		fmt.Printf("(time source: exif=%d quicktime=%d mtime-fallback=%d)\n",
-			stats.FromExif, stats.FromQuickTime, stats.FromMtime)
-	}
-	return p, nil
 }
 
 func optionalEnd(p period.Period) string {

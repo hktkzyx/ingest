@@ -45,7 +45,10 @@ go install ./cmd/ingest
 | `internal/scanner/` | 遍历源卷，区分媒体文件与 sidecar |
 | `internal/mount/` | 跨平台枚举可移动挂载卷；按 GOOS 分文件（linux/darwin/windows），调用方再用 `device.Detect` 二次过滤 |
 | `internal/device/` | 设备识别匹配器 + YAML 加载；出厂默认在 `default.yaml`（go:embed），用户配置在 `~/.config/ingest/devices.yaml` |
-| `internal/period/` | 时间段推断；当前基于 mtime，预留 EXIF 接入位 |
+| `internal/timestamp/` | EXIF / QuickTime 拍摄时间提取 |
+| `internal/period/` | 时间段推断 + 多事件分段（gap_days）；优先 timestamp，mtime 兜底 |
+| `internal/prompt/` | 交互式 stdin 提示（设备确认、段编辑、卷选择）；统一 `IO{In, Out}`，无外部状态便于 mock |
+| `internal/config/` | `config.yaml` 加载，全局设置（gap_days 等）；与 device 分离 |
 | `internal/template/` | 路径模板解析与渲染 |
 | `internal/copier/` | 安全拷贝协议——**关键路径，谨慎修改** |
 | `internal/db/` | SQLite 历史库；Schema 在 `db.go` 的 `schema` 常量里 |
@@ -274,4 +277,4 @@ sqlite3 ~/.local/share/ingest/ingest.db \
 
 ## 许可证
 
-随项目（待定，倾向 MIT 或 Apache-2.0）。
+[MIT](./LICENSE)。贡献代码即视为同意以同样许可证发布。

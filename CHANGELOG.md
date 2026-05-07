@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- **多事件分段**：`period.Segments(files, gapDays)` 把文件按拍摄时间相邻聚成段；相邻文件日期间隔 ≤ `gap_days` 视为同段。
+- **`config.yaml` 全局设置**：`internal/config` 包，路径同 `~/.config/ingest/`，首次运行写入内嵌默认；目前只有 `gap_days`，后续可加更多工具行为参数。
+- **交互式 prompt**：`internal/prompt` 包提供设备确认（Y/n/list）、段编辑（范围 + 事件名）、卷选择；统一 `IO{In, Out}` 便于 mock。
+- **设备交互式覆盖**：自动检测后 prompt 用户确认，错了可输 `list` 改选；`--device` 显式指定时跳过；`--yes` 自动接受。
+- **多段交互式确认**：自动分段后逐段 prompt 起止日期 + 事件名；`--name` 仅适用于单段（多段时报错）。
+- `--gap-days N` flag，临时覆盖 config 中的设置。
+- `--config <path>` flag，覆盖默认 `config.yaml` 路径。
+- `LICENSE` 文件（MIT），README/CONTRIBUTING 许可证节同步。
+
+### Changed
+
+- `runIngest` 主流程重写：load settings → mount detection → device confirm → segment files → per-segment prompt → loop copy。
+- 单段 `--name` 行为保留向后兼容；多段 + `--name` 报错（不知道把名字给哪段）；多段 + `--yes` 报错（不允许盲发）。
+- `internal/period` 重写 `Infer` 为 `Segments` 的退化版（强制单段）。
+- README 安装节重写，明确推荐预编译二进制下载，列出 5 平台文件名表，说明 `devices.yaml` / `config.yaml` 由 `go:embed` 内嵌、首次运行自动写出。
+
 ## [0.1.0-alpha.1] - 2026-05-08
 
 第一个 alpha 预发布。MVP 之上完成 Phase 1 ergonomics 三件套（YAML 设备配置、EXIF/QT 时间提取、自动挂载检测）以及跨平台 release 流水线。TUI 推迟到 v0.2.0。
