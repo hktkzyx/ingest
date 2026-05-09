@@ -240,6 +240,58 @@ func (io IO) ConfirmProceed(s ProceedSummary) (bool, error) {
 	}
 }
 
+// ConflictInfo 描述一次"目标已存在但内容实质不同"的冲突现场。
+// SrcHash/DstHash 在同 size 不同 hash 的情形下非空；size 不同时为空字符串
+// （上层只展示 size 差就够了，不必为决策再算一次 hash）。
+type ConflictInfo struct {
+	RelPath          string // 相对源根的路径，给用户看
+	TrashPath        string // 旧文件即将被搬到的位置（绝对或相对路径都行，纯展示）
+	SrcSize, DstSize int64
+	SrcHash, DstHash string
+}
+
+// ConfirmOverwrite 询问用户是否覆盖已存在但内容不同的目标文件。
+// 返回 true 表示同意覆盖；false 表示保留旧目标、跳过这一份 src。
+//
+//	冲突: PRIVATE/M4ROOT/CLIP/C0001.MP4
+//	  源:    abc123de... (12.3 MB)
+//	  目标:  98ef76cd... (12.3 MB)
+//	  旧文件将移到: /backups/.ingest-trash/2026-05-10T12-34-56/C0001.MP4
+//	覆盖? [y/N]:
+func (io IO) ConfirmOverwrite(c ConflictInfo) (bool, error) {
+	fmt.Fprintf(io.Out, "\n冲突: %s\n", c.RelPath)
+	if c.SrcHash != "" && c.DstHash != "" {
+		fmt.Fprintf(io.Out, "  源:    %s (%s)\n", shortHash(c.SrcHash), humanBytes(c.SrcSize))
+		fmt.Fprintf(io.Out, "  目标:  %s (%s)\n", shortHash(c.DstHash), humanBytes(c.DstSize))
+	} else {
+		fmt.Fprintf(io.Out, "  源:    %s\n", humanBytes(c.SrcSize))
+		fmt.Fprintf(io.Out, "  目标:  %s (大小不同)\n", humanBytes(c.DstSize))
+	}
+	if c.TrashPath != "" {
+		fmt.Fprintf(io.Out, "  旧文件将移到: %s\n", c.TrashPath)
+	}
+	fmt.Fprint(io.Out, "覆盖? [y/N]: ")
+	ans, err := io.readLine()
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(ans)) {
+	case "y", "yes":
+		return true, nil
+	case "", "n", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("无法识别的回答 %q (期望 y/n)", ans)
+	}
+}
+
+func shortHash(h string) string {
+	if len(h) <= 8 {
+		return h
+	}
+	return h[:8] + "..."
+}
+
 // HumanBytes 把字节数格式成 "4.2 GB" / "123.0 MB" 这样的字符串，纯展示用。
 // 导出给 cmd 层拼 ProceedSummary.Segments 字符串用。
 func HumanBytes(n int64) string { return humanBytes(n) }

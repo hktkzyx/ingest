@@ -197,6 +197,68 @@ func contains(haystack, needle string) bool {
 	}())
 }
 
+func TestConfirmOverwrite_RejectsByDefault(t *testing.T) {
+	// 默认（回车 / "n"）应保留旧文件。
+	for _, in := range []string{"\n", "n\n", "no\n", "N\n"} {
+		io, _ := newIO(in)
+		ok, err := io.ConfirmOverwrite(ConflictInfo{
+			RelPath: "C0001.MP4", SrcSize: 100, DstSize: 100,
+			SrcHash: "abc12345deadbeef", DstHash: "ff998877cafebabe",
+		})
+		if err != nil || ok {
+			t.Errorf("input %q: expected default reject, got ok=%v err=%v", in, ok, err)
+		}
+	}
+}
+
+func TestConfirmOverwrite_AcceptsExplicitY(t *testing.T) {
+	for _, in := range []string{"y\n", "Y\n", "yes\n"} {
+		io, _ := newIO(in)
+		ok, err := io.ConfirmOverwrite(ConflictInfo{
+			RelPath: "C0001.MP4", SrcSize: 100, DstSize: 100,
+			SrcHash: "abc12345", DstHash: "ff998877",
+		})
+		if err != nil || !ok {
+			t.Errorf("input %q: expected overwrite accept, got ok=%v err=%v", in, ok, err)
+		}
+	}
+}
+
+func TestConfirmOverwrite_RendersHashesAndTrash(t *testing.T) {
+	io, out := newIO("n\n")
+	_, _ = io.ConfirmOverwrite(ConflictInfo{
+		RelPath:   "PRIVATE/M4ROOT/CLIP/C0001.MP4",
+		TrashPath: "/backups/.ingest-trash/2026-05-10T12-34-56/C0001.MP4",
+		SrcSize:   1_300_000, DstSize: 1_300_000,
+		SrcHash: "abc12345deadbeef", DstHash: "ff998877cafebabe",
+	})
+	s := out.String()
+	for _, want := range []string{
+		"PRIVATE/M4ROOT/CLIP/C0001.MP4",
+		"abc12345",
+		"ff998877",
+		".ingest-trash/2026-05-10T12-34-56/C0001.MP4",
+		"覆盖? [y/N]",
+	} {
+		if !contains(s, want) {
+			t.Errorf("output missing %q\n--- output ---\n%s", want, s)
+		}
+	}
+}
+
+// size 不同时应在目标行后标注「大小不同」，且不展示 hash（节省时间）。
+func TestConfirmOverwrite_DifferentSizeNoHashes(t *testing.T) {
+	io, out := newIO("n\n")
+	_, _ = io.ConfirmOverwrite(ConflictInfo{
+		RelPath: "C0001.MP4",
+		SrcSize: 100, DstSize: 50,
+	})
+	s := out.String()
+	if !contains(s, "大小不同") {
+		t.Errorf("expected 大小不同 marker in output, got:\n%s", s)
+	}
+}
+
 func TestHumanBytes(t *testing.T) {
 	cases := map[int64]string{
 		512:                "512 B",
