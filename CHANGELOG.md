@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+## [0.1.0-alpha.3] - 2026-05-10
+
+第三个 alpha 预发布。重点是把"直接运行 `ingest`"做成完整的中文交互式向导，并修复 SONY 卡上孤立 sidecar 文件污染备份的问题。
+
 ### Fixed
 
 - **scanner 过滤孤立 sidecar**：原来 `.xml/.thm/.srt/.lrc` 只看扩展名收入，导致 SONY 卡的 `PRIVATE/M4ROOT/THMBNL/CTRL_INF.xml`、`PRIVATE/DATABASE/MEDIAPRO.xml` 这类相机内部状态文件也被当作 sidecar 拷到目标目录，污染备份。改为：sidecar 只在**同目录存在同 base name 的媒体文件**时才收入；孤立 sidecar 跳过。
@@ -113,7 +117,8 @@
 - 没有 TUI；事件名 `--name` 必填，无交互式提示
 - 测试套件计划在 Phase 4 补齐，当前仓库无单元测试
 
-[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.2...HEAD
+[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.3...HEAD
+[0.1.0-alpha.3]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.1
 [0.0.1]: https://github.com/hktkzyx/ingest/releases/tag/v0.0.1
