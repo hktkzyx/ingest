@@ -153,6 +153,45 @@ func TestAskTarget_TrimsWhitespace(t *testing.T) {
 	}
 }
 
+// 用户从资源管理器/Finder 复制带引号的路径粘进来时，stdin 不会自动剥引号。
+// 不剥的话 filepath.Abs 把首字符 " 当相对路径起点，路径会被错误地拼到 cwd 后。
+func TestAskTarget_StripsPastedDoubleQuotes(t *testing.T) {
+	io, _ := newIO("\"E:\\multimedia\"\n")
+	got, err := io.AskTarget("C:\\Backups")
+	if err != nil {
+		t.Fatalf("AskTarget: %v", err)
+	}
+	if got != "E:\\multimedia" {
+		t.Errorf("expected stripped path, got %q", got)
+	}
+}
+
+func TestAskTarget_StripsPastedSingleQuotes(t *testing.T) {
+	io, _ := newIO("'/Volumes/Photos'\n")
+	got, _ := io.AskTarget("/default")
+	if got != "/Volumes/Photos" {
+		t.Errorf("expected stripped path, got %q", got)
+	}
+}
+
+// 不成对的引号原样保留（用户有可能就想这么命名目录）。
+func TestAskTarget_KeepsUnpairedQuote(t *testing.T) {
+	io, _ := newIO("/tmp/weird\"name\n")
+	got, _ := io.AskTarget("/default")
+	if got != "/tmp/weird\"name" {
+		t.Errorf("expected unpaired quote preserved, got %q", got)
+	}
+}
+
+// 含空格的引号路径：剥掉外层引号，内部空格保留。
+func TestAskTarget_StripsQuotesAroundPathWithSpaces(t *testing.T) {
+	io, _ := newIO("\"/My Drive/2026 footage\"\n")
+	got, _ := io.AskTarget("/default")
+	if got != "/My Drive/2026 footage" {
+		t.Errorf("expected spaces preserved inside stripped quotes, got %q", got)
+	}
+}
+
 func TestConfirmProceed_AcceptsYAndEmpty(t *testing.T) {
 	for _, in := range []string{"\n", "y\n", "yes\n", "Y\n"} {
 		io, _ := newIO(in)
