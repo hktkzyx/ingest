@@ -53,12 +53,12 @@ const (
 
 // ConfirmDevice 显示自动检测的设备名并询问是否接受。返回 DeviceChoice。
 //
-//	Detected: SONY ZVE10M2 (zve10m2, confidence 0.80 via directory structure)
-//	Accept? [Y/n/list]:
+//	检测到设备: SONY ZVE10M2 (zve10m2, 置信度 0.80, 来自 directory structure)
+//	接受? [Y=接受 / n=拒绝 / list=查看列表]:
 func (io IO) ConfirmDevice(name, id, reason string, confidence float64) (DeviceChoice, error) {
-	fmt.Fprintf(io.Out, "Detected device: %s (%s, confidence %.2f via %s)\n",
+	fmt.Fprintf(io.Out, "检测到设备: %s (%s, 置信度 %.2f, 来自 %s)\n",
 		name, id, confidence, reason)
-	fmt.Fprint(io.Out, "Accept? [Y/n/list]: ")
+	fmt.Fprint(io.Out, "接受? [Y=接受 / n=拒绝 / list=查看列表]: ")
 	ans, err := io.readLine()
 	if err != nil {
 		return DeviceReject, err
@@ -71,7 +71,7 @@ func (io IO) ConfirmDevice(name, id, reason string, confidence float64) (DeviceC
 	case "l", "list":
 		return DeviceList, nil
 	default:
-		return DeviceReject, fmt.Errorf("unrecognized answer %q (expected y/n/list)", ans)
+		return DeviceReject, fmt.Errorf("无法识别的回答 %q (期望 y/n/list)", ans)
 	}
 }
 
@@ -85,13 +85,13 @@ type DeviceOption struct {
 // PickDevice 列出全部可选设备并按数字让用户选。返回选中的索引。
 func (io IO) PickDevice(options []DeviceOption) (int, error) {
 	if len(options) == 0 {
-		return -1, fmt.Errorf("no devices to pick from")
+		return -1, fmt.Errorf("没有可选设备")
 	}
-	fmt.Fprintln(io.Out, "Devices in config:")
+	fmt.Fprintln(io.Out, "配置中的设备:")
 	for i, o := range options {
 		fmt.Fprintf(io.Out, "  [%d] %-12s %s (%s)\n", i+1, o.ID, o.Name, o.Manufacturer)
 	}
-	fmt.Fprint(io.Out, "Pick one [1]: ")
+	fmt.Fprint(io.Out, "选一个 [默认 1]: ")
 	ans, err := io.readLine()
 	if err != nil {
 		return -1, err
@@ -102,7 +102,7 @@ func (io IO) PickDevice(options []DeviceOption) (int, error) {
 	}
 	n, err := strconv.Atoi(ans)
 	if err != nil || n < 1 || n > len(options) {
-		return -1, fmt.Errorf("invalid selection %q", ans)
+		return -1, fmt.Errorf("无效选择 %q", ans)
 	}
 	return n - 1, nil
 }
@@ -124,16 +124,16 @@ type SegmentResult struct {
 
 // EditSegment 展示一个段的默认范围并询问范围调整 + 事件名。
 //
-//	Segment 1/3: 2026-04-27 → 2026-04-28 (123 files, 4.2 GB)
-//	  Range [enter to accept | YYYY-MM-DD..YYYY-MM-DD]: <enter>
-//	  Event name: 周末骑行
+//	事件 1/3: 2026-04-27 → 2026-04-28 (123 个文件, 4.2 GB)
+//	  日期范围 [回车接受默认 | YYYY-MM-DD..YYYY-MM-DD]: <enter>
+//	  事件名称: 周末骑行
 func (io IO) EditSegment(s SegmentEdit) (SegmentResult, error) {
-	fmt.Fprintf(io.Out, "\nSegment %d/%d: %s → %s (%d files, %s)\n",
+	fmt.Fprintf(io.Out, "\n事件 %d/%d: %s → %s (%d 个文件, %s)\n",
 		s.Index, s.Total,
 		s.Start.Format("2006-01-02"), s.End.Format("2006-01-02"),
 		s.FileCount, humanBytes(s.Bytes))
 
-	fmt.Fprint(io.Out, "  Range [enter to accept | YYYY-MM-DD..YYYY-MM-DD]: ")
+	fmt.Fprint(io.Out, "  日期范围 [回车接受默认 | YYYY-MM-DD..YYYY-MM-DD]: ")
 	rangeLine, err := io.readLine()
 	if err != nil {
 		return SegmentResult{}, err
@@ -142,19 +142,19 @@ func (io IO) EditSegment(s SegmentEdit) (SegmentResult, error) {
 	if t := strings.TrimSpace(rangeLine); t != "" {
 		ps, pe, err := parseRange(t)
 		if err != nil {
-			return SegmentResult{}, fmt.Errorf("range: %w", err)
+			return SegmentResult{}, fmt.Errorf("日期范围: %w", err)
 		}
 		start, end = ps, pe
 	}
 
-	fmt.Fprint(io.Out, "  Event name: ")
+	fmt.Fprint(io.Out, "  事件名称: ")
 	name, err := io.readLine()
 	if err != nil {
 		return SegmentResult{}, err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return SegmentResult{}, fmt.Errorf("event name cannot be empty")
+		return SegmentResult{}, fmt.Errorf("事件名称不能为空")
 	}
 	return SegmentResult{Start: start, End: end, Name: name}, nil
 }
@@ -179,7 +179,71 @@ func parseRange(s string) (start, end time.Time, err error) {
 	return start, end, nil
 }
 
-// humanBytes 把字节数格式成 "4.2 GB" / "123.0 MB" 这样的字符串，纯展示用。
+// AskTarget 询问目标根目录，回车接受 defaultDir。
+//
+//	保存到哪里? [默认: ~/Backups]:
+func (io IO) AskTarget(defaultDir string) (string, error) {
+	fmt.Fprintf(io.Out, "保存到哪里? [默认: %s]: ", defaultDir)
+	line, err := io.readLine()
+	if err != nil {
+		return "", err
+	}
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return defaultDir, nil
+	}
+	return line, nil
+}
+
+// ProceedSummary 拷贝前的总览数据。Segments 是每段简述（"2026-04-27→04-28 周末骑行 (123 files, 4.2 GB)"）。
+type ProceedSummary struct {
+	Target     string
+	Device     string
+	TotalFiles int
+	TotalBytes int64
+	Segments   []string
+	DryRun     bool
+}
+
+// ConfirmProceed 在拷贝前展示总览并询问是否继续。
+//
+//	准备拷贝 4 个文件 (1.2 GB) → /tmp/out
+//	设备: SONY ZVE10M2
+//	  • 2026-04-27→04-28  五一假期前  (2 files, 580 MB)
+//	  • 2026-04-30→05-01  五一假期    (2 files, 640 MB)
+//	继续? [Y/n]:
+func (io IO) ConfirmProceed(s ProceedSummary) (bool, error) {
+	verb := "拷贝"
+	if s.DryRun {
+		verb = "预览（dry-run）"
+	}
+	fmt.Fprintf(io.Out, "\n准备%s %d 个文件 (%s) → %s\n",
+		verb, s.TotalFiles, humanBytes(s.TotalBytes), s.Target)
+	if s.Device != "" {
+		fmt.Fprintf(io.Out, "设备: %s\n", s.Device)
+	}
+	for _, seg := range s.Segments {
+		fmt.Fprintf(io.Out, "  • %s\n", seg)
+	}
+	fmt.Fprint(io.Out, "继续? [Y/n]: ")
+	ans, err := io.readLine()
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(ans)) {
+	case "", "y", "yes":
+		return true, nil
+	case "n", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("无法识别的回答 %q (期望 y/n)", ans)
+	}
+}
+
+// HumanBytes 把字节数格式成 "4.2 GB" / "123.0 MB" 这样的字符串，纯展示用。
+// 导出给 cmd 层拼 ProceedSummary.Segments 字符串用。
+func HumanBytes(n int64) string { return humanBytes(n) }
+
 func humanBytes(n int64) string {
 	const unit = 1024.0
 	if n < int64(unit) {

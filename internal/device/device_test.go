@@ -31,7 +31,7 @@ func TestScore_VolumeLabelHitsHighest(t *testing.T) {
 	root := t.TempDir()
 	// 即使没有目录结构，卷标命中就应该 0.90。
 	m := score(makeRule(), root, "SONY")
-	if m == nil || m.Confidence != 0.9 || m.Reason != "volume label" {
+	if m == nil || m.Confidence != 0.9 || m.Reason != "卷标" {
 		t.Fatalf("expected volume label match 0.90, got %+v", m)
 	}
 }
@@ -40,7 +40,7 @@ func TestScore_AllDirectoriesPresentGives080(t *testing.T) {
 	root := t.TempDir()
 	mkdirs(t, root, "PRIVATE/M4ROOT", "DCIM/100MSDCF")
 	m := score(makeRule(), root, "")
-	if m == nil || m.Confidence != 0.8 || m.Reason != "directory structure" {
+	if m == nil || m.Confidence != 0.8 || m.Reason != "目录结构" {
 		t.Fatalf("expected full-dir match 0.80, got %+v", m)
 	}
 }
@@ -52,7 +52,7 @@ func TestScore_FilePatternFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := score(makeRule(), root, "")
-	if m == nil || m.Confidence != 0.7 || m.Reason != "file pattern" {
+	if m == nil || m.Confidence != 0.7 || m.Reason != "文件名模式" {
 		t.Fatalf("expected file-pattern match 0.70, got %+v", m)
 	}
 }
@@ -76,7 +76,7 @@ func TestScore_TwoDirectoryHitsTriggerPartial(t *testing.T) {
 	root := t.TempDir()
 	mkdirs(t, root, "a", "b")
 	m := score(rule, root, "")
-	if m == nil || m.Reason != "partial directory" {
+	if m == nil || m.Reason != "部分目录" {
 		t.Fatalf("expected partial directory match, got %+v", m)
 	}
 	want := 0.5 + 0.1*2
@@ -106,7 +106,7 @@ func TestScore_Pocket3RealStructure(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := score(rule, root, "")
-	if m == nil || m.Reason != "directory structure" || m.Confidence != 0.8 {
+	if m == nil || m.Reason != "目录结构" || m.Confidence != 0.8 {
 		t.Fatalf("Pocket3 should hit directory structure 0.80, got %+v", m)
 	}
 }

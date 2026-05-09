@@ -6,6 +6,25 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **scanner 过滤孤立 sidecar**：原来 `.xml/.thm/.srt/.lrc` 只看扩展名收入，导致 SONY 卡的 `PRIVATE/M4ROOT/THMBNL/CTRL_INF.xml`、`PRIVATE/DATABASE/MEDIAPRO.xml` 这类相机内部状态文件也被当作 sidecar 拷到目标目录，污染备份。改为：sidecar 只在**同目录存在同 base name 的媒体文件**时才收入；孤立 sidecar 跳过。
+
+### Added
+
+- **零参数交互式向导**：直接运行 `ingest`（不带任何 flag）就能跟着提示完成备份。
+  - 启动 banner: `ingest <版本> — 智能素材导入向导`
+  - 四个段落：`[1/4] 选择源` → `[2/4] 确认设备` → `[3/4] 扫描素材并按事件分段` → `[4/4] 确认目标并开始拷贝`
+  - 每段开始前打 banner，过程中状态用统一中文文案展示
+- **目标目录交互询问**：`--target` 没显式给时，弹 `保存到哪里? [默认: ~/Backups]:`，回车接受默认或粘贴新路径
+- **拷贝前总览确认**：列出全部段（日期 / 事件名 / 文件数 / 字节 / 目标路径）+ 总文件数 + 设备名，最后 `继续? [Y/n]: `；`--yes` 跳过总览
+- 新 prompt API：`AskTarget`、`ConfirmProceed`、`HumanBytes`（导出）
+
+### Changed
+
+- **全部交互提示中文化**：设备确认 prompt（`接受? [Y=接受 / n=拒绝 / list=查看列表]`）、设备列表选择、段编辑（`事件 X/Y`、`日期范围`、`事件名称`）、自动检测源信息、错误消息、verbose 时间来源标签、最终 `完成: X 个已拷贝...` 总结、设备识别 reason 字段（`卷标 / 目录结构 / 文件名模式 / 部分目录`）
+- scanner 测试覆盖孤立 sidecar 过滤、配对 sidecar 保留、跨目录不配对、大小写不敏感配对
+
 ## [0.1.0-alpha.2] - 2026-05-08
 
 第二个 alpha 预发布。在 alpha.1 上补齐多事件分段、交互式段编辑、设备识别确认 prompt，并修正两个出厂识别规则与 partial directory 评分阈值。

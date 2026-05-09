@@ -41,7 +41,7 @@ func score(r Rule, root, label string) *Match {
 	upper := strings.ToUpper(label)
 	for _, lab := range r.VolumeLabels {
 		if upper != "" && strings.Contains(upper, strings.ToUpper(lab)) {
-			return &Match{Rule: r, Confidence: 0.9, Reason: "volume label"}
+			return &Match{Rule: r, Confidence: 0.9, Reason: "卷标"}
 		}
 	}
 	dirHits := 0
@@ -51,16 +51,16 @@ func score(r Rule, root, label string) *Match {
 		}
 	}
 	if len(r.Directories) > 0 && dirHits == len(r.Directories) {
-		return &Match{Rule: r, Confidence: 0.8, Reason: "directory structure"}
+		return &Match{Rule: r, Confidence: 0.8, Reason: "目录结构"}
 	}
 	if matchesAny(r.FilePatterns, root) {
-		return &Match{Rule: r, Confidence: 0.7, Reason: "file pattern"}
+		return &Match{Rule: r, Confidence: 0.7, Reason: "文件名模式"}
 	}
 	// 部分目录命中：要求至少 2 个目录命中才回退到此档，避免单个偶然命中
 	// （比如杂牌 U 盘上有个 DCIM）造成的 false positive。规则只配 1 个目录
 	// 时不参与 partial 评分（要么全中，要么不中）。
 	if dirHits >= 2 {
-		return &Match{Rule: r, Confidence: 0.5 + 0.1*float64(dirHits), Reason: "partial directory"}
+		return &Match{Rule: r, Confidence: 0.5 + 0.1*float64(dirHits), Reason: "部分目录"}
 	}
 	return nil
 }
