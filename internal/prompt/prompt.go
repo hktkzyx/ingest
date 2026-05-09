@@ -182,17 +182,34 @@ func parseRange(s string) (start, end time.Time, err error) {
 // AskTarget 询问目标根目录，回车接受 defaultDir。
 //
 //	保存到哪里? [默认: ~/Backups]:
+//
+// 用户从资源管理器复制路径时常常带上首尾的引号（Windows "复制为路径"、
+// macOS "拷贝为路径名" 都会加 "..."），shell 命令行能自动剥引号但 stdin 不会，
+// 不剥的话 expandPath 拿到的字符串首字符是 "，会被当相对路径拼到 cwd 后。
+// 所以这里显式去掉成对的双/单引号。
 func (io IO) AskTarget(defaultDir string) (string, error) {
 	fmt.Fprintf(io.Out, "保存到哪里? [默认: %s]: ", defaultDir)
 	line, err := io.readLine()
 	if err != nil {
 		return "", err
 	}
-	line = strings.TrimSpace(line)
+	line = stripPastedQuotes(strings.TrimSpace(line))
 	if line == "" {
 		return defaultDir, nil
 	}
 	return line, nil
+}
+
+// stripPastedQuotes 去掉一对包裹整个字符串的 " 或 '。不成对、内嵌的引号原样保留。
+func stripPastedQuotes(s string) string {
+	if len(s) < 2 {
+		return s
+	}
+	first, last := s[0], s[len(s)-1]
+	if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+		return s[1 : len(s)-1]
+	}
+	return s
 }
 
 // ProceedSummary 拷贝前的总览数据。Segments 是每段简述（"2026-04-27→04-28 周末骑行 (123 files, 4.2 GB)"）。
