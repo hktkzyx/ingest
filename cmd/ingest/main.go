@@ -20,7 +20,7 @@ import (
 	"github.com/hktkzyx/ingest/internal/template"
 )
 
-var version = "0.1.0"
+var version = "0.1.1"
 
 const defaultTemplate = "{date_start}[_{date_end}]-{event_name}/origin-{device_name}"
 
