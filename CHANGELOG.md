@@ -6,6 +6,21 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-10
+
+第一个正式版（非 pre-release）。在 alpha.5 基础上无功能变更，只是把版本号去掉 `-alpha.N` 后缀，让 goreleaser 把这次 release 标记为 latest 而不是 Pre-release。
+
+阶段性总结（相对 v0.0.1 MVP 的累计变化）：
+
+- **设备规则外置**（alpha.1）：`devices.yaml` 由 `go:embed` 内嵌出厂默认（SONY ZVE10M2 + DJI Pocket3），首次运行写到 `~/.config/ingest/devices.yaml`，可通过 `--devices` 覆盖。
+- **跨平台 release 流水线**（alpha.1）：goreleaser + GitHub Actions，tag push 自动构建 Linux/macOS/Windows 共 5 平台二进制 + checksums。
+- **EXIF / QuickTime 时间提取**（alpha.1）：替代单纯 mtime；`--gap-days` 把相邻文件聚成多事件分段。
+- **零参数交互式向导**（alpha.3）：直接运行 `ingest` 进入 `[1/4]…[4/4]` 中文向导：选源 → 确认设备 → 扫描分段 → 确认目标并拷贝；中途任意一步可拒绝并回退。
+- **scanner 过滤孤立 sidecar**（alpha.3）：`.xml/.thm/.srt/.lrc` 仅在同目录有同名媒体文件时才收入，避免 SONY 卡的 `THMBNL/CTRL_INF.xml`、`DATABASE/MEDIAPRO.xml` 这类内部状态文件污染备份。
+- **覆盖保护 + .ingest-trash**（alpha.4）：dst 已存在但内容实质不同时不再静默覆盖，默认 prompt 用户确认；同意后旧文件移到 `<target>/.ingest-trash/<runStartTime>/`，由用户手动清理。`--overwrite` 跳过 prompt 直接覆盖；`--yes` 模式默认保守跳过冲突。
+- **AskTarget 引号修复**（alpha.5）：交互输入目标路径时剥掉资源管理器粘贴时带的首尾引号，避免 `"E:\multimedia"` 被当成相对路径。
+- **测试覆盖**：scanner / copier / prompt / device / period / mount / timestamp 7 个包共数十个 case，覆盖 sidecar 配对、覆盖保护各分支、交互输入边界、设备识别评分。
+
 ## [0.1.0-alpha.5] - 2026-05-10
 
 紧跟在 alpha.4 之后的单点 bugfix：交互式输入目标目录时，资源管理器粘贴的带引号路径被错误识别为相对路径。
@@ -145,7 +160,8 @@
 - 没有 TUI；事件名 `--name` 必填，无交互式提示
 - 测试套件计划在 Phase 4 补齐，当前仓库无单元测试
 
-[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.5...HEAD
+[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0
 [0.1.0-alpha.5]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.3
