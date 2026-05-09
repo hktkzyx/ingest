@@ -6,6 +6,19 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-10
+
+文档与发布元数据修复，无功能或行为变更。
+
+### Fixed
+
+- **`.goreleaser.yaml`**：`release.name_template` 由 `v{{ .Version }}` 改为 `{{ .Version }}`，GitHub Release 标题用纯版本号（如 `0.1.1`），不再带 `v` 前缀。git tag 仍保留 `vX.Y.Z` 形式（SemVer/goreleaser 习惯）。
+- **README**：移除硬编码版本号，避免 README 随 release 节奏过时。
+  - 状态行不再写具体版本号（如 `v0.1.0-alpha.1 已发布`），改为引用 [Releases](https://github.com/hktkzyx/ingest/releases) 与 [CHANGELOG](./CHANGELOG.md)。
+  - Linux/macOS 下载示例用 GitHub `releases/latest` API 自动取最新正式版 tag，不再写死 `ingest_0.1.0-alpha.1_linux_x86_64.tar.gz`。
+  - `ingest version` 输出示例改为占位描述。
+  - Roadmap 表 `v0.1.0` 行去掉「当前 alpha」状态修饰，改为 `v0.1.x`。
+
 ## [0.1.0] - 2026-05-10
 
 第一个正式版（非 pre-release）。在 alpha.5 基础上无功能变更，只是把版本号去掉 `-alpha.N` 后缀，让 goreleaser 把这次 release 标记为 latest 而不是 Pre-release。
@@ -160,7 +173,8 @@
 - 没有 TUI；事件名 `--name` 必填，无交互式提示
 - 测试套件计划在 Phase 4 补齐，当前仓库无单元测试
 
-[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.1
 [0.1.0]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0
 [0.1.0-alpha.5]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.4

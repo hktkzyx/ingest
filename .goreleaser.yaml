@@ -67,4 +67,4 @@ changelog:
 release:
   draft: true
   prerelease: auto
-  name_template: "v{{ .Version }}"
+  name_template: "{{ .Version }}"
