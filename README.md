@@ -4,7 +4,7 @@
 
 `ingest` 是一个跨平台的命令行工具，用于把相机 SD 卡里的素材按结构归档到本地，并保证字节级校验、可重复执行。它面向多设备影像创作者（微单 + 无人机 + 运动相机），目标是把 `rsync` 的可靠性和 Kocard / Hedge 这类商业工具的易用性结合起来——但完全开源、可定制。
 
-**当前状态**：`v0.1.0-alpha.1` 已发布预编译二进制（5 平台）。功能基本对齐 PRD Phase 1：YAML 设备配置、EXIF/QuickTime 时间提取、自动挂载检测、多事件分段、交互式设备/事件确认。TUI 交互推迟到 v0.2.0。完整规格见 [PRD.md](./PRD.md)。
+**当前状态**：已发布预编译二进制（Linux / macOS / Windows 共 5 平台）。功能对齐 PRD Phase 1：YAML 设备配置、EXIF/QuickTime 时间提取、自动挂载检测、多事件分段、交互式设备/事件确认、覆盖保护。TUI 推迟到 Phase 2。完整规格见 [PRD.md](./PRD.md)；版本与变更见 [Releases](https://github.com/hktkzyx/ingest/releases) 与 [CHANGELOG](./CHANGELOG.md)。
 
 ---
 
@@ -24,7 +24,7 @@
 
 ### 推荐：下载预编译二进制
 
-到 [Releases](https://github.com/hktkzyx/ingest/releases) 选最新的 `v0.1.0-alpha.x` 或更高版本，下载对应平台的归档：
+到 [Releases](https://github.com/hktkzyx/ingest/releases) 选最新版本，下载对应平台的归档：
 
 | 平台 | 文件名 |
 |---|---|
@@ -39,8 +39,10 @@
 **Linux / macOS**
 
 ```bash
-# 一行下载 + 解包到 /usr/local/bin（按平台改文件名）
-curl -L https://github.com/hktkzyx/ingest/releases/latest/download/ingest_0.1.0-alpha.1_linux_x86_64.tar.gz | tar xz
+# 自动取最新正式版（不含 pre-release），按平台改架构后缀（linux_arm64 / macos_x86_64 / macos_arm64）
+TAG=$(curl -fsSL https://api.github.com/repos/hktkzyx/ingest/releases/latest | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+VER="${TAG#v}"
+curl -fsSL "https://github.com/hktkzyx/ingest/releases/download/${TAG}/ingest_${VER}_linux_x86_64.tar.gz" | tar xz
 sudo install -m 0755 ingest /usr/local/bin/
 ingest version
 ```
@@ -70,7 +72,7 @@ export PATH="$HOME/go/bin:$PATH"   # 写到 ~/.zshrc 或 ~/.bashrc 持久化
 ### 验证
 
 ```bash
-ingest version          # → ingest 0.0.1-dev
+ingest version          # → 当前版本号
 ingest devices list     # → 当前配置的设备规则（首次运行自动生成 ~/.config/ingest/devices.yaml）
 ```
 
@@ -276,7 +278,7 @@ CLI 上的 `--gap-days N` 会临时覆盖这里的设置。
 
 | 版本 | 重点 |
 |---|---|
-| **v0.1.0**（当前 alpha）| YAML 设备配置、EXIF/QT 时间提取、跨平台自动挂载检测、多事件分段、交互式设备 / 事件确认、跨平台 release 流水线 |
+| **v0.1.x** | YAML 设备配置、EXIF/QT 时间提取、跨平台自动挂载检测、多事件分段、交互式设备 / 事件确认、覆盖保护、跨平台 release 流水线 |
 | **v0.2.0** | TUI 交互（bubbletea）、多目标备份、`verify` / `history` 子命令、`devices.yaml`/`config.yaml` schema 校验 |
 | **v0.3.0** | 代理文件生成（FFmpeg）、多卡队列、剪辑软件 XML 导出、云端归档 |
 | **v1.0.0** | 测试覆盖率 >80%、包管理分发（Homebrew/Scoop） |
