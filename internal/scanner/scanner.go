@@ -35,17 +35,28 @@ func IsSidecar(name string) bool {
 	return SidecarExtensions[strings.ToLower(filepath.Ext(name))]
 }
 
+// Scan 遍历 root 收集媒体文件。Sidecar（.xml/.thm/.srt/.lrc）只在
+// **同目录存在同 base name 的媒体文件**时才一并收入——这样能避开相机
+// 内部的状态文件（SONY 的 PRIVATE/M4ROOT/THMBNL/*.xml、PRIVATE/DATABASE
+// 等），那些 .xml 与用户素材没有 base name 对应关系，是数据库 / 索引文件，
+// 拷过去只会污染目标目录。
+//
+// 算法：先一次遍历找出所有"媒体 base name"（按目录 + 文件名 stem 索引），
+// 然后第二次遍历时把孤立 sidecar 过滤掉。
 func Scan(root string) ([]File, error) {
-	var out []File
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	var allEntries []File
+	mediaStems := map[string]bool{} // key: dir + "\x00" + stem(lowercased)
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 		if d.IsDir() {
 			return nil
 		}
-		isMedia := IsMedia(d.Name())
-		if !isMedia && !IsSidecar(d.Name()) {
+		name := d.Name()
+		isMedia := IsMedia(name)
+		if !isMedia && !IsSidecar(name) {
 			return nil
 		}
 		info, err := d.Info()
@@ -56,14 +67,41 @@ func Scan(root string) ([]File, error) {
 		if err != nil {
 			return err
 		}
-		out = append(out, File{
+		f := File{
 			Path:    path,
 			RelPath: rel,
 			Size:    info.Size(),
 			Info:    info,
 			IsMedia: isMedia,
-		})
+		}
+		allEntries = append(allEntries, f)
+		if isMedia {
+			mediaStems[stemKey(path)] = true
+		}
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]File, 0, len(allEntries))
+	for _, f := range allEntries {
+		if f.IsMedia {
+			out = append(out, f)
+			continue
+		}
+		// sidecar：仅在同目录有同 base 媒体文件时保留
+		if mediaStems[stemKey(f.Path)] {
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
+// stemKey 把 "/dir/foo.JPG" 映射成 "/dir\x00foo"（小写 stem），
+// 用作 mediaStems 的 key。\x00 不会出现在文件名里，安全做分隔符。
+func stemKey(path string) string {
+	dir, base := filepath.Split(path)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	return dir + "\x00" + strings.ToLower(stem)
 }

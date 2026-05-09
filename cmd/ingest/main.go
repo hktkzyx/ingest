@@ -20,7 +20,7 @@ import (
 	"github.com/hktkzyx/ingest/internal/template"
 )
 
-var version = "0.1.0-alpha.2"
+var version = "0.1.0-alpha.3"
 
 const defaultTemplate = "{date_start}[_{date_end}]-{event_name}/origin-{device_name}"
 
@@ -100,7 +100,7 @@ func devicesCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("(rules from %s)\n", path)
+			fmt.Printf("(规则来自 %s)\n", path)
 			for _, r := range rules {
 				fmt.Printf("  %-12s %s (%s)\n", r.ID, r.Name, r.Manufacturer)
 			}
@@ -110,13 +110,16 @@ func devicesCmd() *cobra.Command {
 	return c
 }
 
-func runIngest(_ *cobra.Command, _ []string) error {
+func runIngest(cmd *cobra.Command, _ []string) error {
 	io := prompt.NewStdio(os.Stdin, os.Stdout)
 
-	target, err := expandPath(flagTarget)
-	if err != nil {
-		return fmt.Errorf("--target: %w", err)
+	// 启动横幅。让用户清楚现在是哪个工具的哪个模式，并预告 4 步流程。
+	fmt.Fprintf(io.Out, "ingest %s — 智能素材导入向导\n", version)
+	fmt.Fprintln(io.Out, "================================================")
+	if flagDryRun {
+		fmt.Fprintln(io.Out, "（dry-run 模式：仅预览，不实际拷贝）")
 	}
+
 	devicesPath, err := expandPath(flagDevicesPath)
 	if err != nil {
 		return fmt.Errorf("--devices: %w", err)
@@ -138,28 +141,39 @@ func runIngest(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("load devices: %w", err)
 	}
 	if len(rules) == 0 {
-		return fmt.Errorf("no device rules in %s — add at least one entry", devicesPath)
+		return fmt.Errorf("%s 里没有任何设备规则——至少加一个条目", devicesPath)
 	}
 
+	// [1/4] 源选择
+	fmt.Fprintln(io.Out, "\n[1/4] 选择源")
 	src, err := resolveSource(io, rules)
 	if err != nil {
 		return err
 	}
 
+	// [2/4] 设备识别
+	fmt.Fprintln(io.Out, "\n[2/4] 确认设备")
+	deviceID, deviceName, err := resolveDevice(io, src, rules)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(io.Out, "  → %s (%s)\n", deviceName, deviceID)
+
+	// [3/4] 扫描 + 分段
+	fmt.Fprintln(io.Out, "\n[3/4] 扫描素材并按事件分段")
 	files, err := scanner.Scan(src)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
 	if len(files) == 0 {
-		return fmt.Errorf("no media files found under %s", src)
+		return fmt.Errorf("在 %s 下没找到媒体文件", src)
 	}
-	fmt.Printf("Scanned %d files in %s\n", len(files), src)
-
-	deviceID, deviceName, err := resolveDevice(io, src, rules)
-	if err != nil {
-		return err
+	var totalSrcBytes int64
+	for _, f := range files {
+		totalSrcBytes += f.Size
 	}
-	fmt.Printf("Device: %s (%s)\n", deviceID, deviceName)
+	fmt.Fprintf(io.Out, "  扫描到 %d 个文件 (%s)，源: %s\n",
+		len(files), prompt.HumanBytes(totalSrcBytes), src)
 
 	byPath := make(map[string]scanner.File, len(files))
 	for _, f := range files {
@@ -171,12 +185,71 @@ func runIngest(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	if flagVerbose {
-		fmt.Printf("Found %d segment(s) with gap_days=%d\n", len(segments), gapDays)
+		fmt.Fprintf(io.Out, "  分成 %d 段 (gap_days=%d)\n", len(segments), gapDays)
 	}
 
 	plans, err := planSegments(io, segments, byPath)
 	if err != nil {
 		return err
+	}
+
+	// [4/4] 目标 + 总览确认 + 拷贝
+	fmt.Fprintln(io.Out, "\n[4/4] 确认目标并开始拷贝")
+	target, err := resolveTarget(io, cmd)
+	if err != nil {
+		return err
+	}
+
+	// 计算每段的目标路径 + 字节数，组装 summary 给用户最终确认
+	planTargets := make([]string, len(plans))
+	planBytes := make([]int64, len(plans))
+	summarySegs := make([]string, len(plans))
+	totalPlanBytes := int64(0)
+	totalPlanFiles := 0
+	for i, plan := range plans {
+		rendered, err := template.Render(flagTemplate, template.Context{
+			DateStart:  plan.Start.Format("20060102"),
+			DateEnd:    optionalEnd(plan.Period()),
+			EventName:  plan.Name,
+			DeviceID:   deviceID,
+			DeviceName: strings.ReplaceAll(deviceName, " ", "_"),
+		})
+		if err != nil {
+			return fmt.Errorf("template (segment %d): %w", i+1, err)
+		}
+		planTargets[i] = filepath.Join(target, rendered)
+		var b int64
+		for _, f := range plan.Files {
+			b += f.Size
+		}
+		planBytes[i] = b
+		totalPlanBytes += b
+		totalPlanFiles += len(plan.Files)
+
+		dateLabel := plan.Start.Format("2006-01-02")
+		if !plan.End.IsZero() && !plan.Start.Equal(plan.End) {
+			dateLabel = fmt.Sprintf("%s→%s", plan.Start.Format("2006-01-02"), plan.End.Format("2006-01-02"))
+		}
+		summarySegs[i] = fmt.Sprintf("%s  %s  (%d 个文件, %s) → %s",
+			dateLabel, plan.Name, len(plan.Files), prompt.HumanBytes(b), planTargets[i])
+	}
+
+	if !flagYes {
+		ok, err := io.ConfirmProceed(prompt.ProceedSummary{
+			Target:     target,
+			Device:     deviceName,
+			TotalFiles: totalPlanFiles,
+			TotalBytes: totalPlanBytes,
+			Segments:   summarySegs,
+			DryRun:     flagDryRun,
+		})
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintln(io.Out, "已取消。")
+			return nil
+		}
 	}
 
 	dbPath, err := expandPath(flagDBPath)
@@ -196,22 +269,12 @@ func runIngest(_ *cobra.Command, _ []string) error {
 	var totalBytes int64
 	startAll := time.Now()
 	for i, plan := range plans {
-		rendered, err := template.Render(flagTemplate, template.Context{
-			DateStart:  plan.Start.Format("20060102"),
-			DateEnd:    optionalEnd(plan.Period()),
-			EventName:  plan.Name,
-			DeviceID:   deviceID,
-			DeviceName: strings.ReplaceAll(deviceName, " ", "_"),
-		})
-		if err != nil {
-			return fmt.Errorf("template (segment %d): %w", i+1, err)
-		}
-		targetDir := filepath.Join(target, rendered)
-		fmt.Printf("\n[Segment %d/%d] %s\n", i+1, len(plans), targetDir)
+		targetDir := planTargets[i]
+		fmt.Fprintf(io.Out, "\n[第 %d/%d 段] %s\n", i+1, len(plans), targetDir)
 
 		if flagDryRun {
 			for _, f := range plan.Files {
-				fmt.Printf("  [dry-run] %s → %s\n",
+				fmt.Fprintf(io.Out, "  [dry-run] %s → %s\n",
 					f.RelPath, filepath.Join(targetDir, filepath.Base(f.Path)))
 			}
 			continue
@@ -232,12 +295,31 @@ func runIngest(_ *cobra.Command, _ []string) error {
 	if elapsed > 0 {
 		mbps = float64(totalBytes) / elapsed.Seconds() / (1024 * 1024)
 	}
-	fmt.Printf("\nDone: %d copied, %d skipped, %d failed in %s (%.1f MB/s)\n",
+	fmt.Fprintf(io.Out, "\n完成: %d 个已拷贝, %d 个跳过, %d 个失败, 用时 %s (%.1f MB/s)\n",
 		totalCopied, totalSkipped, totalFailed, elapsed, mbps)
 	if totalFailed > 0 {
-		return fmt.Errorf("%d files failed", totalFailed)
+		return fmt.Errorf("%d 个文件失败", totalFailed)
 	}
 	return nil
+}
+
+// resolveTarget 决定本次的目标根目录。优先级：
+//   - --target 显式给出 → 直接展开使用
+//   - --yes 时 → 静默用默认值（不 prompt）
+//   - 其它情况（默认零参数交互）→ 弹 AskTarget，回车接受默认
+func resolveTarget(io prompt.IO, cmd *cobra.Command) (string, error) {
+	if cmd.Flags().Changed("target") || flagYes {
+		return expandPath(flagTarget)
+	}
+	defaultDir, err := expandPath(flagTarget)
+	if err != nil {
+		return "", err
+	}
+	picked, err := io.AskTarget(defaultDir)
+	if err != nil {
+		return "", err
+	}
+	return expandPath(picked)
 }
 
 // segmentPlan 是一个段经过用户确认后的最终拷贝计划。
@@ -287,11 +369,11 @@ func buildSegments(files []scanner.File, gapDays int) ([]period.Segment, error) 
 
 	segs, stats := period.Segments(scannerToPeriod(files), gapDays)
 	if flagVerbose {
-		fmt.Printf("(time source: exif=%d quicktime=%d mtime-fallback=%d)\n",
+		fmt.Printf("(时间来源: exif=%d quicktime=%d mtime 兜底=%d)\n",
 			stats.FromExif, stats.FromQuickTime, stats.FromMtime)
 	}
 	if len(segs) == 0 {
-		return nil, fmt.Errorf("could not derive any time segment from files")
+		return nil, fmt.Errorf("无法从文件中推断出任何时间段")
 	}
 	return segs, nil
 }
@@ -308,13 +390,11 @@ func scannerToPeriod(files []scanner.File) []period.File {
 // period.File 列表对回 scanner.File（拷贝阶段需要 RelPath）。
 func planSegments(io prompt.IO, segs []period.Segment, byPath map[string]scanner.File) ([]segmentPlan, error) {
 	if len(segs) > 1 && flagName != "" {
-		return nil, fmt.Errorf("--name is ambiguous with %d auto-detected segments; "+
-			"either run without --name to be prompted per segment, "+
-			"or use --from/--to to force a single segment", len(segs))
+		return nil, fmt.Errorf("自动检测到 %d 段，--name 无法分配给哪一段; "+
+			"去掉 --name 让程序逐段询问名字，或用 --from/--to 强制单段", len(segs))
 	}
 	if len(segs) > 1 && flagYes && flagName == "" {
-		return nil, fmt.Errorf("multiple segments detected and --yes set; "+
-			"--yes is incompatible with multi-segment ingestion (each segment needs a name)")
+		return nil, fmt.Errorf("检测到多段同时又传了 --yes; --yes 与多段拷贝不兼容（每段都需要名字）")
 	}
 
 	plans := make([]segmentPlan, 0, len(segs))
@@ -366,14 +446,14 @@ func resolveSource(io prompt.IO, rules []device.Rule) (string, error) {
 			return "", fmt.Errorf("--source: %w", err)
 		}
 		if st, err := os.Stat(src); err != nil || !st.IsDir() {
-			return "", fmt.Errorf("source not a directory: %s", src)
+			return "", fmt.Errorf("源不是目录: %s", src)
 		}
 		return src, nil
 	}
 
 	vols, err := mount.List()
 	if err != nil {
-		return "", fmt.Errorf("auto-detect mounts: %w (pass --source explicitly)", err)
+		return "", fmt.Errorf("自动检测挂载点失败: %w (请用 --source 明确指定)", err)
 	}
 	type candidate struct {
 		Volume     mount.Volume
@@ -390,10 +470,10 @@ func resolveSource(io prompt.IO, rules []device.Rule) (string, error) {
 	}
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("no removable volumes matched any device rule; pass --source explicitly")
+		return "", fmt.Errorf("没有匹配到任何设备规则的可移动卷; 请用 --source 明确指定")
 	case 1:
 		c := matches[0]
-		fmt.Fprintf(io.Out, "Auto-detected source: %s (%s, confidence %.2f via %s)\n",
+		fmt.Fprintf(io.Out, "自动检测到源: %s (%s, 置信度 %.2f, 来自 %s)\n",
 			c.Volume.Path, c.Match.Rule.Name, c.Confidence, c.Match.Reason)
 		return c.Volume.Path, nil
 	}
@@ -407,14 +487,14 @@ func resolveSource(io prompt.IO, rules []device.Rule) (string, error) {
 	}
 	if flagYes {
 		c := matches[0]
-		fmt.Fprintf(io.Out, "Auto-selected (--yes): %s (%s, confidence %.2f)\n",
+		fmt.Fprintf(io.Out, "自动选定 (--yes): %s (%s, 置信度 %.2f)\n",
 			c.Volume.Path, c.Match.Rule.Name, c.Confidence)
 		return c.Volume.Path, nil
 	}
 
-	fmt.Fprintln(io.Out, "Multiple removable volumes matched device rules:")
+	fmt.Fprintln(io.Out, "多个可移动卷匹配到设备规则:")
 	for i, c := range matches {
-		fmt.Fprintf(io.Out, "  [%d] %-40s %s (confidence %.2f, %s)\n",
+		fmt.Fprintf(io.Out, "  [%d] %-40s %s (置信度 %.2f, %s)\n",
 			i+1, c.Volume.Path, c.Match.Rule.Name, c.Confidence, c.Match.Reason)
 	}
 	options := make([]prompt.DeviceOption, 0, len(matches))
@@ -447,7 +527,7 @@ func resolveDevice(io prompt.IO, src string, rules []device.Rule) (id, name stri
 	label := volumeLabelOf(src)
 	m := device.Detect(rules, src, label)
 	if m == nil {
-		return "", "", fmt.Errorf("could not auto-detect device; pass --device explicitly")
+		return "", "", fmt.Errorf("无法自动识别设备; 请用 --device 明确指定")
 	}
 	if flagYes {
 		return m.Rule.ID, m.Rule.Name, nil
@@ -460,7 +540,7 @@ func resolveDevice(io prompt.IO, src string, rules []device.Rule) (id, name stri
 	case prompt.DeviceAccept:
 		return m.Rule.ID, m.Rule.Name, nil
 	case prompt.DeviceReject:
-		return "", "", fmt.Errorf("device rejected; rerun with --device <id> to override")
+		return "", "", fmt.Errorf("设备已拒绝; 请重新运行并加 --device <id> 覆盖")
 	case prompt.DeviceList:
 		opts := make([]prompt.DeviceOption, 0, len(rules))
 		for _, r := range rules {
@@ -472,7 +552,7 @@ func resolveDevice(io prompt.IO, src string, rules []device.Rule) (id, name stri
 		}
 		return rules[idx].ID, rules[idx].Name, nil
 	}
-	return "", "", fmt.Errorf("unhandled device choice")
+	return "", "", fmt.Errorf("未处理的设备选择")
 }
 
 func copyFiles(files []scanner.File, targetDir, deviceID string, store *db.DB) (copied, skipped, failed int, totalBytes int64) {
@@ -484,16 +564,16 @@ func copyFiles(files []scanner.File, targetDir, deviceID string, store *db.DB) (
 			copied++
 			totalBytes += out.Bytes
 			if flagVerbose {
-				fmt.Printf("  copied  %s (%s)\n", f.RelPath, out.Hash)
+				fmt.Printf("  已拷贝  %s (%s)\n", f.RelPath, out.Hash)
 			}
 		case copier.ResultSkipped:
 			skipped++
 			if flagVerbose {
-				fmt.Printf("  skip    %s\n", f.RelPath)
+				fmt.Printf("  跳过    %s\n", f.RelPath)
 			}
 		case copier.ResultFailed:
 			failed++
-			fmt.Fprintf(os.Stderr, "  FAILED  %s: %v\n", f.RelPath, out.Err)
+			fmt.Fprintf(os.Stderr, "  失败    %s: %v\n", f.RelPath, out.Err)
 		}
 	}
 	return

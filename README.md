@@ -78,12 +78,29 @@ ingest devices list     # → 当前配置的设备规则（首次运行自动�
 
 ## 快速开始
 
+### 推荐：零参数交互式向导
+
+插好卡，直接：
+
 ```bash
-# 仅预览，不实际拷贝
+ingest
+```
+
+工具会按 `[1/4] 选择源 → [2/4] 确认设备 → [3/4] 扫描素材并按事件分段 → [4/4] 确认目标并开始拷贝` 四步走，途中提示如下：
+
+- 自动找到能匹配的可移动卷（多个时让你选）
+- 自动识别设备并问 `接受? [Y=接受 / n=拒绝 / list=查看列表]:`
+- 按 `gap_days`（默认 1）把文件分成若干个事件段，逐段询问日期范围 + `事件名称`
+- 最后 `保存到哪里? [默认: ~/Backups]:` + 总览 `继续? [Y/n]:`
+
+### 脚本化用法（带 flag）
+
+```bash
+# 单段 + 显式参数 + dry-run
 ingest --source /Volumes/SONY_XYZ --target ~/Backups --name "周末骑行" --dry-run
 
-# 真实运行 + 详细日志
-ingest --source /Volumes/SONY_XYZ --target ~/Backups --name "周末骑行" -v
+# 自动检测 + 接受所有 prompt（非交互）
+ingest --yes --target ~/Backups --name "测试"
 ```
 
 输出目录结构：

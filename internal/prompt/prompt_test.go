@@ -107,8 +107,12 @@ func TestEditSegment_OverridesRange(t *testing.T) {
 func TestEditSegment_RejectsEmptyName(t *testing.T) {
 	io, _ := newIO("\n\n")
 	s := SegmentEdit{Index: 1, Total: 1, Start: time.Now(), End: time.Now()}
-	if _, err := io.EditSegment(s); err == nil {
-		t.Errorf("expected error for empty name")
+	_, err := io.EditSegment(s)
+	if err == nil {
+		t.Fatalf("expected error for empty name")
+	}
+	if !strings.Contains(err.Error(), "事件名称") {
+		t.Errorf("expected Chinese error about empty name, got %q", err.Error())
 	}
 }
 
@@ -123,6 +127,74 @@ func TestEditSegment_SingleDateAsRange(t *testing.T) {
 	if !r.Start.Equal(want) || !r.End.Equal(want) {
 		t.Errorf("single date should produce start==end: %s..%s", r.Start, r.End)
 	}
+}
+
+func TestAskTarget_EmptyReturnsDefault(t *testing.T) {
+	io, _ := newIO("\n")
+	got, err := io.AskTarget("/home/x/Backups")
+	if err != nil || got != "/home/x/Backups" {
+		t.Errorf("default target: got %q err %v", got, err)
+	}
+}
+
+func TestAskTarget_OverridesWithUserInput(t *testing.T) {
+	io, _ := newIO("/mnt/external/Archive\n")
+	got, err := io.AskTarget("/home/x/Backups")
+	if err != nil || got != "/mnt/external/Archive" {
+		t.Errorf("override target: got %q err %v", got, err)
+	}
+}
+
+func TestAskTarget_TrimsWhitespace(t *testing.T) {
+	io, _ := newIO("   /tmp/out   \n")
+	got, _ := io.AskTarget("/default")
+	if got != "/tmp/out" {
+		t.Errorf("trim target: got %q", got)
+	}
+}
+
+func TestConfirmProceed_AcceptsYAndEmpty(t *testing.T) {
+	for _, in := range []string{"\n", "y\n", "yes\n", "Y\n"} {
+		io, _ := newIO(in)
+		ok, err := io.ConfirmProceed(ProceedSummary{Target: "/x", TotalFiles: 1})
+		if err != nil || !ok {
+			t.Errorf("input %q: got ok=%v err=%v", in, ok, err)
+		}
+	}
+}
+
+func TestConfirmProceed_RejectsN(t *testing.T) {
+	io, _ := newIO("n\n")
+	ok, err := io.ConfirmProceed(ProceedSummary{Target: "/x"})
+	if err != nil || ok {
+		t.Errorf("expected reject, got ok=%v err=%v", ok, err)
+	}
+}
+
+func TestConfirmProceed_RendersSegments(t *testing.T) {
+	io, out := newIO("y\n")
+	_, _ = io.ConfirmProceed(ProceedSummary{
+		Target: "/tmp/out", Device: "SONY ZVE10M2",
+		TotalFiles: 4, TotalBytes: 1_300_000_000,
+		Segments: []string{"a-b 五一假期前 (2 files)", "c-d 五一假期 (2 files)"},
+	})
+	s := out.String()
+	for _, want := range []string{"4 个文件", "1.2 GB", "/tmp/out", "SONY ZVE10M2", "五一假期前", "五一假期"} {
+		if !contains(s, want) {
+			t.Errorf("output missing %q\n--- output ---\n%s", want, s)
+		}
+	}
+}
+
+func contains(haystack, needle string) bool {
+	return len(haystack) >= len(needle) && (func() bool {
+		for i := 0; i+len(needle) <= len(haystack); i++ {
+			if haystack[i:i+len(needle)] == needle {
+				return true
+			}
+		}
+		return false
+	}())
 }
 
 func TestHumanBytes(t *testing.T) {
