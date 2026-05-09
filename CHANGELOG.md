@@ -6,6 +6,26 @@
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] - 2026-05-10
+
+第四个 alpha 预发布。给"目标已有同名但内容不同"的情况补上覆盖保护：默认 prompt 用户确认，确认后旧文件移到目标目录下的 `.ingest-trash/<timestamp>/` 而不是 unlink。
+
+> 行为变更（仅影响有同名 dst 的场景）：alpha.3 及之前版本会在 dst 存在但内容不同时静默覆盖；alpha.4 起默认 prompt 确认，`--yes` 模式下默认保留旧目标（旧的"自动覆盖"行为需要显式 `--overwrite`）。
+
+### Added
+
+- **覆盖保护**：dst 已存在但内容实质不同（同 size 不同 hash 或 size 不同）时，`copier.SafeCopy` 不再静默覆盖，而是返回新结果 `ResultConflict`，由调用方决定。
+- **交互式覆盖确认**：`prompt.IO.ConfirmOverwrite(ConflictInfo)` 展示源/目标 hash + size 与"旧文件将移到 .ingest-trash/<timestamp>/<base name>"的去向，询问 `覆盖? [y/N]`（默认 N，保守保留旧目标）。
+- **trash 备份**：`copier.OverwriteCopy(..., trashDir)` 在覆盖前把旧 dst rename 到 `<target>/.ingest-trash/<runStartTime>/<base name>`（同名冲突自动加唯一后缀）；trash 由用户手动清理，ingest 不主动删。`runStartTime` 桶用 `2026-05-10T12-34-56` 形式（避免 `:` 不兼容 Windows）。
+- `--overwrite` flag：在冲突时无 prompt 直接覆盖（旧版本仍走 trash）。
+- `internal/copier/copier_test.go` 共 11 个测试覆盖：fresh / 内容相同 skip / db 快路径 skip / 同 size 不同 hash conflict / 不同 size conflict / 删除后重拷 / OverwriteCopy 移 trash / 无 trashDir 直接 unlink / trash 同名冲突自动加后缀 / fresh OverwriteCopy。
+- `internal/prompt/prompt_test.go` 增 4 个 ConfirmOverwrite 测试。
+
+### Changed
+
+- `--yes` 在冲突时**保守跳过**（保留旧目标）并打 warn 到 stderr，而不是盲覆盖；要在自动模式下覆盖请同时加 `--overwrite`。
+- `cmd/ingest/main.go` 的 `copyFiles` 重写：增加 `prompt.IO`、`trashDir`、`conflictPolicy` 参数；`runIngest` 在拷贝循环开始前把整次运行共享的 `runTrashDir` 计算好。
+
 ## [0.1.0-alpha.3] - 2026-05-10
 
 第三个 alpha 预发布。重点是把"直接运行 `ingest`"做成完整的中文交互式向导，并修复 SONY 卡上孤立 sidecar 文件污染备份的问题。
@@ -117,7 +137,8 @@
 - 没有 TUI；事件名 `--name` 必填，无交互式提示
 - 测试套件计划在 Phase 4 补齐，当前仓库无单元测试
 
-[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.3...HEAD
+[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.4...HEAD
+[0.1.0-alpha.4]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.1

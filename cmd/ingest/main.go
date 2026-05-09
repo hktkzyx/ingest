@@ -20,7 +20,7 @@ import (
 	"github.com/hktkzyx/ingest/internal/template"
 )
 
-var version = "0.1.0-alpha.3"
+var version = "0.1.0-alpha.4"
 
 const defaultTemplate = "{date_start}[_{date_end}]-{event_name}/origin-{device_name}"
 
@@ -39,6 +39,7 @@ var (
 	flagDryRun      bool
 	flagYes         bool
 	flagVerbose     bool
+	flagOverwrite   bool
 )
 
 func main() {
@@ -70,6 +71,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().IntVar(&flagGapDays, "gap-days", -1, "consecutive day gap to merge into one segment (overrides config.yaml)")
 	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "preview only, do not copy")
 	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "accept all prompts (auto-pick highest, accept detected device)")
+	cmd.Flags().BoolVar(&flagOverwrite, "overwrite", false, "auto-overwrite when target file exists with different content (default: prompt; with --yes: skip)")
 	cmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "verbose output")
 
 	cmd.AddCommand(versionCmd(), devicesCmd())
@@ -268,6 +270,10 @@ func runIngest(cmd *cobra.Command, _ []string) error {
 	var totalCopied, totalSkipped, totalFailed int
 	var totalBytes int64
 	startAll := time.Now()
+	// 整次 ingest 共享一个 trash 桶；每段冲突的旧文件都按 base name 平铺到这里。
+	// 用 - 而不是 : 隔开时分秒，兼容 Windows 文件名规则。
+	runTrashDir := filepath.Join(target, ".ingest-trash", startAll.Format("2006-01-02T15-04-05"))
+	policy := overwritePolicy()
 	for i, plan := range plans {
 		targetDir := planTargets[i]
 		fmt.Fprintf(io.Out, "\n[第 %d/%d 段] %s\n", i+1, len(plans), targetDir)
@@ -280,7 +286,7 @@ func runIngest(cmd *cobra.Command, _ []string) error {
 			continue
 		}
 
-		copied, skipped, failed, bytes := copyFiles(plan.Files, targetDir, deviceID, store)
+		copied, skipped, failed, bytes := copyFiles(io, plan.Files, targetDir, deviceID, runTrashDir, policy, store)
 		totalCopied += copied
 		totalSkipped += skipped
 		totalFailed += failed
@@ -555,21 +561,52 @@ func resolveDevice(io prompt.IO, src string, rules []device.Rule) (id, name stri
 	return "", "", fmt.Errorf("未处理的设备选择")
 }
 
-func copyFiles(files []scanner.File, targetDir, deviceID string, store *db.DB) (copied, skipped, failed int, totalBytes int64) {
+// conflictPolicy 决定 copyFiles 遇到 ResultConflict 时的处理：
+//   - policyAsk: prompt 用户每个冲突文件（默认）
+//   - policyOverwrite: 全部覆盖（旧文件移到 trashDir）
+//   - policySkip: 全部跳过冲突，保留旧目标
+type conflictPolicy int
+
+const (
+	policyAsk conflictPolicy = iota
+	policyOverwrite
+	policySkip
+)
+
+// overwritePolicy 把 CLI flag 组合解释成具体策略。
+//   - --overwrite              → policyOverwrite
+//   - --yes 且 没 --overwrite  → policySkip（保守：自动模式下不覆盖未知数据）
+//   - 其余                     → policyAsk
+func overwritePolicy() conflictPolicy {
+	if flagOverwrite {
+		return policyOverwrite
+	}
+	if flagYes {
+		return policySkip
+	}
+	return policyAsk
+}
+
+func copyFiles(io prompt.IO, files []scanner.File, targetDir, deviceID, trashDir string, policy conflictPolicy, store *db.DB) (copied, skipped, failed int, totalBytes int64) {
 	for _, f := range files {
 		dst := filepath.Join(targetDir, filepath.Base(f.Path))
 		out := copier.SafeCopy(f.Path, dst, deviceID, "", store)
+
+		if out.Result == copier.ResultConflict {
+			out = handleConflict(io, f, dst, deviceID, trashDir, policy, store, out)
+		}
+
 		switch out.Result {
 		case copier.ResultCopied:
 			copied++
 			totalBytes += out.Bytes
 			if flagVerbose {
-				fmt.Printf("  已拷贝  %s (%s)\n", f.RelPath, out.Hash)
+				fmt.Fprintf(io.Out, "  已拷贝  %s (%s)\n", f.RelPath, out.Hash)
 			}
 		case copier.ResultSkipped:
 			skipped++
 			if flagVerbose {
-				fmt.Printf("  跳过    %s\n", f.RelPath)
+				fmt.Fprintf(io.Out, "  跳过    %s\n", f.RelPath)
 			}
 		case copier.ResultFailed:
 			failed++
@@ -577,6 +614,39 @@ func copyFiles(files []scanner.File, targetDir, deviceID string, store *db.DB) (
 		}
 	}
 	return
+}
+
+// handleConflict 把一次 ResultConflict 转化成最终的 Copied/Skipped/Failed Outcome。
+// policy 决定动作；其中 policyAsk 走 prompt（用户输入解析失败也按"保留旧目标"处理）。
+func handleConflict(io prompt.IO, f scanner.File, dst, deviceID, trashDir string, policy conflictPolicy, store *db.DB, conflict copier.Outcome) copier.Outcome {
+	overwrite := false
+	switch policy {
+	case policyOverwrite:
+		overwrite = true
+	case policySkip:
+		fmt.Fprintf(os.Stderr, "  冲突    %s (目标已存在但内容不同；--yes 模式下保留旧目标，加 --overwrite 可覆盖)\n", f.RelPath)
+		return copier.Outcome{Result: copier.ResultSkipped, Hash: conflict.SrcHash, Bytes: conflict.Bytes}
+	case policyAsk:
+		ok, err := io.ConfirmOverwrite(prompt.ConflictInfo{
+			RelPath:   f.RelPath,
+			TrashPath: filepath.Join(trashDir, filepath.Base(dst)),
+			SrcSize:   conflict.Bytes, DstSize: conflict.DstSize,
+			SrcHash: conflict.SrcHash, DstHash: conflict.DstHash,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  冲突    %s: %v (保留旧目标)\n", f.RelPath, err)
+			return copier.Outcome{Result: copier.ResultSkipped}
+		}
+		overwrite = ok
+	}
+
+	if !overwrite {
+		if flagVerbose {
+			fmt.Fprintf(io.Out, "  保留    %s (用户选择保留旧目标)\n", f.RelPath)
+		}
+		return copier.Outcome{Result: copier.ResultSkipped}
+	}
+	return copier.OverwriteCopy(f.Path, dst, deviceID, "", trashDir, store)
 }
 
 func volumeLabelOf(p string) string {
