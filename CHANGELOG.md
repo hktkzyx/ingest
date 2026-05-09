@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+## [0.1.0-alpha.5] - 2026-05-10
+
+紧跟在 alpha.4 之后的单点 bugfix：交互式输入目标目录时，资源管理器粘贴的带引号路径被错误识别为相对路径。
+
+### Fixed
+
+- **AskTarget 剥掉粘贴路径首尾的引号**：用户在「保存到哪里?」prompt 里粘贴 `"E:\multimedia"`（资源管理器"复制为路径"自带引号）时，整串含 `"` 进 `expandPath`，`filepath.Abs` 把首字符 `"` 当相对路径起点，结果落到 `<cwd>/"E:\multimedia"`。CLI flag 路径不受影响（shell 自带剥引号）。新增 `stripPastedQuotes` 处理成对的双/单引号；不成对的引号原样保留。
+
 ## [0.1.0-alpha.4] - 2026-05-10
 
 第四个 alpha 预发布。给"目标已有同名但内容不同"的情况补上覆盖保护：默认 prompt 用户确认，确认后旧文件移到目标目录下的 `.ingest-trash/<timestamp>/` 而不是 unlink。
@@ -137,7 +145,8 @@
 - 没有 TUI；事件名 `--name` 必填，无交互式提示
 - 测试套件计划在 Phase 4 补齐，当前仓库无单元测试
 
-[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.4...HEAD
+[Unreleased]: https://github.com/hktkzyx/ingest/compare/v0.1.0-alpha.5...HEAD
+[0.1.0-alpha.5]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/hktkzyx/ingest/releases/tag/v0.1.0-alpha.2
